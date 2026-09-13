@@ -1,0 +1,67 @@
+ok - terminal reconciliation executes standard teardown after recording the receipt
+ok - standard teardown can finish or refuse beyond the classification timeout
+ok - standard teardown safety refusal preserves task and receipt across retries
+ok - failed wake publication preserves the task until a durable retry
+ok - teardown compares the expected incarnation after acquiring its metadata lock
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=done pr=https://example.test/owner/repo/pull/1
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 941: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/main-direct/root/bin/fm-guard.sh: No such file or directory
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 3519: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/main-direct/root/bin/fm-fleet-sync.sh: No such file or directory
+teardown child complete (window firstmate:fm-child, worktree /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/main-direct/main/projects/child)
+Backlog: child just finished (this home keeps no markdown backlog at /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/main-direct/main/data/backlog.md). Update /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/main-direct/main/data/backlog.md - move child to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+automatic teardown: task=child complete
+ok - main direct terminal presentation has a durable receipt
+ok - secondmate delivers a child's terminal ledger line once, on the next poll, from the ledger alone
+ok - busy child locks do not starve later ledger outcomes
+ok - ledger delivery carries the report pointer, the failed verb, and each new terminal line
+ok - pr= requires the recorded PR or a ready-signal terminal line, and never a scout
+ok - terminal lines arriving during state reads remain ledger-owned
+ok - inactive and ledger paths reconcile one raced completion without hiding later events
+ok - progress after an inactive fallback starts a distinct terminal event
+ok - complete long ledger lines retain distinct receipt identities
+ok - a ledger line still being appended waits for its newline
+ok - the remote route carries a child's ledger line once
+ok - report delivers a child's final line, owes nothing twice, and refuses only an unwritable channel
+ok - report preserves teardown's metadata-before-scan lock order
+actionable: child outcome needs parent report: child=child state=failed (missing or unreadable parent binding .fm-secondmate-parent)
+ok - relative local parent homes fail closed
+ok - invalid secondmate markers block routing and surface the obligation
+ok - remote parent-replies mirror input is durable and idempotent
+ok - reused task ids retain per-incarnation terminal receipts
+ok - legacy metadata rewrites preserve terminal receipt identity
+ok - relaunch cannot replace metadata during terminal snapshot
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=done pr=https://example.test/owner/repo/pull/1
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 941: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/heartbeat/root/bin/fm-guard.sh: No such file or directory
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 3519: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/heartbeat/root/bin/fm-fleet-sync.sh: No such file or directory
+teardown child complete (window firstmate:fm-child, worktree /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/heartbeat/main/projects/child)
+Backlog: child just finished (this home keeps no markdown backlog at /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/heartbeat/main/data/backlog.md). Update /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/heartbeat/main/data/backlog.md - move child to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+automatic teardown: task=child complete
+ok - terminal reconciliation ignores heartbeat backoff state
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=done pr=https://example.test/owner/repo/pull/1
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 941: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/marker/root/bin/fm-guard.sh: No such file or directory
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 3519: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/marker/root/bin/fm-fleet-sync.sh: No such file or directory
+teardown child complete (window firstmate:fm-child, worktree /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/marker/main/projects/child)
+Backlog: child just finished (this home keeps no markdown backlog at /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/marker/main/data/backlog.md). Update /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/marker/main/data/backlog.md - move child to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+automatic teardown: task=child complete
+ok - scan marker replaces a symlink without overwriting its target
+ok - nonterminal and captain-held workers remain outside inactive terminal reporting
+ok - watcher hook wakes for terminal loss and preserves idle secondmate exemption
+ok - the real watcher poll delivers a child's terminal ledger line to the parent channel
+actionable: inactive terminal outcome awaiting captain presentation: child=b state=done pr=https://example.test/owner/repo/pull/1
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 941: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/bounded/root/bin/fm-guard.sh: No such file or directory
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 3519: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/bounded/root/bin/fm-fleet-sync.sh: No such file or directory
+teardown b complete (window firstmate:fm-b, worktree /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/bounded/main/projects/b)
+Backlog: b just finished (this home keeps no markdown backlog at /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/bounded/main/data/backlog.md). Update /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/bounded/main/data/backlog.md - move b to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+automatic teardown: task=b complete
+ok - stalled state reads are bounded without starving later children
+ok - aggregate scan budget includes durable wake operations
+actionable: inactive terminal outcome needs parent report: child=child state=failed (missing or unreadable parent binding .fm-secondmate-parent)
+ok - notice recovery remains idempotent across queue acknowledgement
+ok - a secondmate home with no parent binding names the missing binding instead of failing quietly
+actionable: inactive terminal outcome awaiting captain presentation: child=child state=done pr=https://example.test/owner/repo/pull/1
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 941: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/forge/root/bin/fm-guard.sh: No such file or directory
+/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/bin/fm-teardown.sh: line 3519: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/forge/root/bin/fm-fleet-sync.sh: No such file or directory
+teardown child complete (window firstmate:fm-child, worktree /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/forge/main/projects/child)
+Backlog: child just finished (this home keeps no markdown backlog at /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/forge/main/data/backlog.md). Update /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2E273V6NTMF3XNJA6X31BEB/.phase-test-tmp/fm-inactive-reconcile.rd8nkS/forge/main/data/backlog.md - move child to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+automatic teardown: task=child complete
+ok - reconciliation makes zero forge or PR API calls
+all inactive reconciliation tests passed

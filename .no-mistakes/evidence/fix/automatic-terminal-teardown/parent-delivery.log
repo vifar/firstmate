@@ -1,0 +1,15 @@
+Parent ledger after two real CLI scans:
+done [key=child-outcome-child-done-05a16f6d]: child child done: isolated delivery verification completed mode=no-mistakes yolo=off
+Child metadata retained: true
+Receipt:
+schema=fm-terminal-outcome.v1
+fingerprint=05a16f6d8811a51a6500d3c642368dfa
+task_id=child
+incarnation=live-test-one
+state=done
+outcome_key=child-outcome-child-done-05a16f6d
+origin=direct
+phase=upstream
+pr=
+created_epoch=1789327106
+notice_emitted=0
