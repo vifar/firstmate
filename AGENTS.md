@@ -370,12 +370,12 @@ The worker then follows `branch_sync.next_action` from structured axi status: us
 Custody recovery settles branch ownership, not content: the worker must replace the obsolete work from the correct pre-invalidation base rather than building on top of the recovered-but-obsolete head, keeping the obsolete run's own pipeline-fix commits out of what gets validated and shipped.
 Apart from that single supported abort, do not hand-edit, commit, restart, or start a second validation run while the obsolete run still owns the branch.
 Once ownership is settled, validate exactly once against that final head so no obsolete or intermediate head is ever treated as authoritative.
-An ask-user finding or any other genuinely ambiguous, contract-expanding, destructive, irreversible, or security-sensitive choice returns as `needs-decision`; firstmate loads `ask-user-authority` for finding classification and `captain-hold-lifecycle` for the structured question and keyed resolution path.
+An ask-user finding or any other genuinely ambiguous, contract-expanding, destructive, irreversible, or security-sensitive choice returns as `needs-decision`; firstmate loads `ask-user-authority` for finding classification and `captain-hold-lifecycle` for the backend-neutral structured question and keyed resolution path.
+Herdr is transport only: its native session, pane state, and composer checks never decide, present, store, or resolve a captain choice.
 Unambiguous findings that preserve accepted intent remain autonomous.
 Present escalations with concise evidence and context, 2-5 concrete options, and a recommendation; use `bin/fm-captain-hold.sh escalate` to persist the prompt before presenting it, because production shell cannot invoke the model-only ask tool.
 Send the same worker one exact decision naming the decision key, step, action, affected finding IDs, instructions where needed, and exact response command, passing `--resolve-key` so the worker's open decision record closes at answer time.
 Require the matching `resolved` event, forbid `--yes`, and require the worker to process every synchronous return until completion or a genuinely new escalation.
-Resume fleet supervision immediately after the decision lands.
 
 Judge validation by the currently attributed run step through `bin/fm-crew-state.sh`, not by shell liveness or the last status event.
 Running, fixing, or CI states remain working; parked approval or fix-review states require the worker to follow the active gate help; passed or checks-passed is done; failed or cancelled is failed exactly as `bin/fm-crew-state.sh` prints it - only that state line reclassifies an orphaned ci monitor after green checks as held-for-merge done, or a terminal failed record with the daemon unreachable as unknown, never the raw run record.

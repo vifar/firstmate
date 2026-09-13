@@ -14,6 +14,8 @@ This skill is the single owner of decision escalation policy and lifecycle.
 It applies to any genuinely ambiguous, contract-expanding, destructive,
 irreversible, or security-sensitive choice, not only no-mistakes findings.
 Unambiguous findings that preserve accepted intent remain autonomous.
+The policy is backend-neutral: Herdr supplies a worker session and transport,
+but never decides, presents, stores, or resolves a captain choice.
 An escalated choice is presented with concise evidence and context, 2-5
 concrete options, and one recommendation. The structured prompt is persisted
 by `bin/fm-captain-hold.sh escalate` and retrieved with `prompt`; that command

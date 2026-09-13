@@ -88,5 +88,35 @@ EOF
   assert_contains "$(cat "$home/data/backlog.md")" "choose-route" "structured escalation answer did not use the existing keyed intake"
   pass "structured escalations persist 2-5-option prompts and route answers through keyed captain holds"
 }
+
+test_herdr_transport_keeps_escalation_backend_neutral() {
+  local home prompt out
+  home="$TMP_ROOT/herdr-home"
+  mkdir -p "$home/data" "$home/state" "$home/config"
+  cp "$ROOT/.tasks.toml" "$home/.tasks.toml"
+  printf '## In flight\n\n## Queued\n\n## Done\n' > "$home/data/backlog.md"
+  fm_write_meta "$home/state/herdr-route.meta" \
+    "window=herdr-session:herdr-pane" "backend=herdr" "harness=pi" \
+    "kind=ship" "mode=direct-PR"
+  fakebin=$(fm_fakebin "$home")
+  prompt="$home/herdr-prompt.json"
+  cat > "$prompt" <<'EOF'
+{"schema":"fm-captain-escalation.v1","task":"herdr-route","question":"Which Herdr route should ship?","evidence":"Herdr transport reports both endpoints available.","context":"The route changes the accepted compatibility surface.","options":[{"value":"native","label":"Native route"},{"value":"flat","label":"Flat route"}],"recommendation":"native","recommendation_reason":"Native preserves the existing Herdr integration contract."}
+EOF
+  out=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    "$ROOT/bin/fm-captain-hold.sh" escalate herdr-route --title "Herdr route" \
+      --repo firstmate --reason "Herdr route needs captain" --escalation-file "$prompt") \
+    || fail "Herdr-backed escalation failed: $out"
+  out=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    "$ROOT/bin/fm-captain-hold.sh" prompt herdr-route) \
+    || fail "Herdr-backed prompt retrieval failed: $out"
+  printf '%s' "$out" | jq -e '.task == "herdr-route" and .recommendation == "native"' >/dev/null \
+    || fail "Herdr-backed prompt was not backend-neutral: $out"
+  pass "Herdr transport leaves structured captain escalation and keyed resolution backend-neutral"
+}
+
 test_primary_and_secondmate_instruction_generation
 test_structured_escalation_persists_and_validates
+test_herdr_transport_keeps_escalation_backend_neutral
