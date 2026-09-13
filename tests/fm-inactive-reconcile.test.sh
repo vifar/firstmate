@@ -818,6 +818,44 @@ test_reconciliation_never_calls_forge() {
   pass "reconciliation makes zero forge or PR API calls"
 }
 
+test_automatic_teardown_invokes_standard_cleanup() {
+  local log
+  make_world automatic-teardown
+  write_child "$MAIN" child 'done: green'
+  log="$WORLD/teardown.log"
+  cat > "$WORLD/fakebin/teardown" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+exit 0
+EOF
+  chmod +x "$WORLD/fakebin/teardown"
+  FM_INACTIVE_TEARDOWN_BIN="$WORLD/fakebin/teardown" FM_FAKE_CREW_STATE='done' \
+    run_reconcile "$MAIN" --startup >/dev/null
+  [ "$(cat "$log")" = child ] || fail "automatic teardown did not invoke the standard cleanup command"
+  pass "terminal reconciliation automatically invokes standard teardown"
+}
+
+test_automatic_teardown_refusal_preserves_task() {
+  local log
+  make_world automatic-teardown-refused
+  write_child "$MAIN" child 'done: green'
+  log="$WORLD/teardown.log"
+  cat > "$WORLD/fakebin/teardown" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+exit 1
+EOF
+  chmod +x "$WORLD/fakebin/teardown"
+  FM_INACTIVE_TEARDOWN_BIN="$WORLD/fakebin/teardown" FM_FAKE_CREW_STATE='done' \
+    run_reconcile "$MAIN" --startup >/dev/null 2>/dev/null
+  [ -f "$MAIN/state/child.meta" ] || fail "teardown refusal removed task metadata"
+  [ -f "$MAIN/state/terminal-outcomes"/*.pending ] || fail "teardown refusal removed terminal receipt"
+  pass "automatic teardown refusal preserves durable task state"
+}
+
+test_automatic_teardown_invokes_standard_cleanup
+test_automatic_teardown_refusal_preserves_task
+
 test_main_direct_terminal_presentation_receipt
 test_local_secondmate_delivers_terminal_ledger_line
 test_busy_child_does_not_starve_later_ledger_outcomes

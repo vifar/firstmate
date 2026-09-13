@@ -87,6 +87,8 @@ OUTCOME_DIR="$STATE/terminal-outcomes"
 SCAN_MARKER="$STATE/.inactive-outcome-reconcile"
 SCAN_LOCK="$STATE/.inactive-outcome-reconcile.lock"
 CREW_STATE_BIN="${FM_INACTIVE_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
+TEARDOWN_BIN="${FM_INACTIVE_TEARDOWN_BIN:-$SCRIPT_DIR/fm-teardown.sh}"
+RECONCILE_AUTO_TEARDOWN_RECORD=
 
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
@@ -191,11 +193,18 @@ ensure_record() { # <fingerprint> <task> <incarnation> <state> <outcome-key> <or
   RECORD_PENDING=$(record_path "$fingerprint" pending)
   RECORD_PRESENTED=$(record_path "$fingerprint" presented)
   RECORD_REPORTED=$(record_path "$fingerprint" reported)
+  RECORD_CLEANUP_RECORD=
+  if [ -f "$RECORD_PRESENTED" ] && [ ! -L "$RECORD_PRESENTED" ]; then
+    RECORD_CLEANUP_RECORD=$RECORD_PRESENTED
+  elif [ -f "$RECORD_REPORTED" ] && [ ! -L "$RECORD_REPORTED" ]; then
+    RECORD_CLEANUP_RECORD=$RECORD_REPORTED
+  fi
   if [ -f "$RECORD_PRESENTED" ] || [ -f "$RECORD_REPORTED" ]; then
     RECORD_PENDING=
     return 0
   fi
   if [ -f "$RECORD_PENDING" ] && [ ! -L "$RECORD_PENDING" ]; then
+    RECORD_CLEANUP_RECORD=$RECORD_PENDING
     return 0
   fi
   mkdir -p "$OUTCOME_DIR" || return 1
@@ -224,6 +233,16 @@ mark_reported() { # <record>
   [ -f "$record" ] && [ ! -L "$record" ] || return 1
   reported=${record%.pending}.reported
   mv -f "$record" "$reported"
+}
+automatic_teardown() { # <id> <receipt>
+  local id=$1 receipt=$2
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 0
+  "$TEARDOWN_BIN" "$id" || {
+    printf 'automatic teardown refused: task=%s receipt=%s; task retained for retry\n' \
+      "$id" "$(basename "$receipt")" >&2
+    return 0
+  }
+  printf 'automatic teardown: task=%s complete\n' "$id"
 }
 
 queue_key_exists() { # <key>
@@ -509,13 +528,22 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     outcome_key="inactive-outcome-main-$id-$state"
   fi
   ensure_record "$fingerprint" "$id" "$incarnation" "$state" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
-  [ -n "$RECORD_PENDING" ] || return 0
+  if [ -z "$self" ]; then
+    RECONCILE_AUTO_TEARDOWN_RECORD=${RECORD_CLEANUP_RECORD:-}
+  else
+    RECONCILE_AUTO_TEARDOWN_RECORD=
+  fi
+  [ -n "$RECORD_PENDING" ] || {
+    [ -n "$RECONCILE_AUTO_TEARDOWN_RECORD" ] || return 0
+    return 0
+  }
   if [ -n "$self" ]; then
     if report_to_parent "$id" "$state" "$outcome_key" "$fingerprint" "$pr"; then
       mark_reported "$RECORD_PENDING" || return 1
     else
       notice_parent_report_failed "$RECORD_PENDING" "$fingerprint" \
         "inactive terminal outcome needs parent report: child=$id state=$state"
+      RECONCILE_AUTO_TEARDOWN_RECORD=
     fi
     return 0
   fi
@@ -523,15 +551,23 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   payload="inactive terminal outcome awaiting captain presentation: child=$id state=$state"
   [ -z "$pr" ] || payload="$payload pr=$pr"
   queue_presentation "$RECORD_PENDING" "$fingerprint" "$payload" || true
+  RECONCILE_AUTO_TEARDOWN_RECORD=$RECORD_PENDING
 }
 
 reconcile_direct_child() { # <id> <meta> <secondmate-id-or-empty> <timeout>
-  local id=$1 meta=$2 self=${3:-} timeout=$4 lock rc=0
+  local id=$1 meta=$2 self=${3:-} timeout=$4 lock rc=0 receipt=
+  RECONCILE_AUTO_TEARDOWN_RECORD=
   lock=$(fm_meta_lock_path "$meta") || return 1
   fm_lock_acquire_wait "$lock" || return 1
   reconcile_direct_child_locked "$id" "$meta" "$self" "$timeout" || rc=$?
+  receipt=${RECONCILE_AUTO_TEARDOWN_RECORD:-}
   fm_lock_release "$lock"
+  if [ "$rc" -eq 0 ] && [ -n "$receipt" ]; then
+    automatic_teardown "$id" "$receipt" || rc=$?
+  fi
+  RECONCILE_AUTO_TEARDOWN_RECORD=
   return "$rc"
+
 }
 
 # SCAN_FIRST_VISIT_PENDING is armed by scan() before its passes. The deadline
