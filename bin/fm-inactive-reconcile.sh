@@ -29,7 +29,7 @@
 # The cadence-gated scan below then evaluates at most once per
 # FM_INACTIVE_RECONCILE_SECS (default 900, valid 60..1800) per home, except
 # that --startup performs the same scan immediately in the locked session
-# start's deferred worker. Each scan uses an aggregate
+# start's deferred worker. Each classification scan uses an aggregate
 # FM_INACTIVE_RECONCILE_BUDGET_SECS deadline (default 10, valid 1..30) and
 # resumes after its last visited child on the next scan.
 # The scan enforces that budget itself through a whole-second deadline, and the
@@ -62,8 +62,9 @@
 # After creating that receipt and successfully publishing (or finding) its
 # queued presentation, the main-home scan invokes standard non-force teardown.
 # Already presented or reported receipts also permit a cleanup retry.
-# Cleanup runs after releasing the reconciliation meta lock and passes the
-# receipt's incarnation through fm-teardown.sh's --expected-spawn-gen guard.
+# Cleanup runs after releasing the reconciliation meta lock and outside the
+# classification scan's process-group timeout, then passes the receipt's
+# incarnation through fm-teardown.sh's --expected-spawn-gen guard.
 # A publication failure leaves the task and pending receipt for retry; a
 # teardown safety refusal retains the task and receipt without bypassing it.
 # Successful cleanup leaves the receipt available for later acknowledgement,
