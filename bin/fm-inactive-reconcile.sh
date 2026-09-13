@@ -87,7 +87,6 @@ OUTCOME_DIR="$STATE/terminal-outcomes"
 SCAN_MARKER="$STATE/.inactive-outcome-reconcile"
 SCAN_LOCK="$STATE/.inactive-outcome-reconcile.lock"
 CREW_STATE_BIN="${FM_INACTIVE_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
-TEARDOWN_BIN="${FM_INACTIVE_TEARDOWN_BIN:-$SCRIPT_DIR/fm-teardown.sh}"
 RECONCILE_AUTO_TEARDOWN_RECORD=
 
 # shellcheck source=bin/fm-wake-lib.sh
@@ -237,7 +236,7 @@ mark_reported() { # <record>
 automatic_teardown() { # <id> <receipt>
   local id=$1 receipt=$2
   [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 0
-  "$TEARDOWN_BIN" "$id" || {
+  "$SCRIPT_DIR/fm-teardown.sh" "$id" --expected-spawn-gen "$(record_value "$receipt" incarnation)" || {
     printf 'automatic teardown refused: task=%s receipt=%s; task retained for retry\n' \
       "$id" "$(basename "$receipt")" >&2
     return 0
@@ -493,7 +492,7 @@ report_child() { # <id>
 }
 
 reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeout>
-  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line state pr incarnation fingerprint outcome_key payload kind state_rc=0
+  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line state pr incarnation fingerprint outcome_key payload kind state_rc=0 presentation_rc=0
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
   kind=$(meta_field "$meta" kind)
   [ "$kind" = secondmate ] && return 0
@@ -528,13 +527,10 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     outcome_key="inactive-outcome-main-$id-$state"
   fi
   ensure_record "$fingerprint" "$id" "$incarnation" "$state" "$outcome_key" direct "upstream" "$pr" "$(sha256_text "$last")" || return 1
-  if [ -z "$self" ]; then
-    RECONCILE_AUTO_TEARDOWN_RECORD=${RECORD_CLEANUP_RECORD:-}
-  else
-    RECONCILE_AUTO_TEARDOWN_RECORD=
-  fi
   [ -n "$RECORD_PENDING" ] || {
-    [ -n "$RECONCILE_AUTO_TEARDOWN_RECORD" ] || return 0
+    if [ -z "$self" ]; then
+      RECONCILE_AUTO_TEARDOWN_RECORD=${RECORD_CLEANUP_RECORD:-}
+    fi
     return 0
   }
   if [ -n "$self" ]; then
@@ -550,7 +546,8 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   record_phase_set "$RECORD_PENDING" presentation || return 1
   payload="inactive terminal outcome awaiting captain presentation: child=$id state=$state"
   [ -z "$pr" ] || payload="$payload pr=$pr"
-  queue_presentation "$RECORD_PENDING" "$fingerprint" "$payload" || true
+  queue_presentation "$RECORD_PENDING" "$fingerprint" "$payload" || presentation_rc=$?
+  [ "$presentation_rc" -le 1 ] || return 1
   RECONCILE_AUTO_TEARDOWN_RECORD=$RECORD_PENDING
 }
 
