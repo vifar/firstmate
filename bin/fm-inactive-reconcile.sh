@@ -59,6 +59,18 @@
 # path share the same receipt store.
 # In a main home, a presentation-stage record is acknowledged by fm-wake-drain
 # only after its corresponding inactive-outcome wake is handled.
+# After creating that receipt and successfully publishing (or finding) its
+# queued presentation, the main-home scan invokes standard non-force teardown.
+# Already presented or reported receipts also permit a cleanup retry.
+# Cleanup runs after releasing the reconciliation meta lock and passes the
+# receipt's incarnation through fm-teardown.sh's --expected-spawn-gen guard.
+# A publication failure leaves the task and pending receipt for retry; a
+# teardown safety refusal retains the task and receipt without bypassing it.
+# Successful cleanup leaves the receipt available for later acknowledgement,
+# and repeated scans reuse receipts and suppress duplicate queued presentations.
+# Secondmate-home delivery does not trigger automatic cleanup.
+# tests/fm-inactive-reconcile.test.sh covers cleanup ordering, publication
+# failure, safety refusal, incarnation replacement, and repeated reconciliation.
 # A receipt is intentionally independent of .hb-surfaced-* bookkeeping.
 #
 # New fm-terminal-outcome.v1 receipts contain schema, fingerprint, task_id,
@@ -75,8 +87,9 @@
 # main-home acknowledgement. The atomic epoch/cursor marker's mtime gates scans,
 # and its cursor records the last child visited within the aggregate budget.
 #
-# The scan reads only durable local state and fm-crew-state.sh; it never invokes
-# gh, gh-axi, curl, fm-pr-check.sh, fm-pr-poll.sh, or a state *.check.sh.
+# Terminal classification reads only durable local state and fm-crew-state.sh;
+# it never invokes a PR poll or a state *.check.sh. Subsequent standard teardown
+# may consult the forge and refresh the clone under its own safety contract.
 set -u
 export LC_ALL=C
 

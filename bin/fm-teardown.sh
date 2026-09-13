@@ -151,6 +151,9 @@
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--expected-spawn-gen <generation>]
+#   --expected-spawn-gen requires the current record's published spawn_gen to
+#   match under the task's meta lock before cleanup; missing or mismatched
+#   identity refuses even with --force, protecting a replacement incarnation.
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
 #   when the captain has explicitly said to discard the work.
