@@ -246,10 +246,9 @@ mark_reported() { # <record>
   reported=${record%.pending}.reported
   mv -f "$record" "$reported"
 }
-automatic_teardown() { # <id> <receipt>
-  local id=$1 receipt=$2
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 0
-  "$SCRIPT_DIR/fm-teardown.sh" "$id" --expected-spawn-gen "$(record_value "$receipt" incarnation)" || {
+automatic_teardown() { # <id> <receipt> <incarnation>
+  local id=$1 receipt=$2 incarnation=$3
+  "$SCRIPT_DIR/fm-teardown.sh" "$id" --expected-spawn-gen "$incarnation" || {
     printf 'automatic teardown refused: task=%s receipt=%s; task retained for retry\n' \
       "$id" "$(basename "$receipt")" >&2
     return 0
@@ -571,10 +570,10 @@ reconcile_direct_child() { # <id> <meta> <secondmate-id-or-empty> <timeout>
   fm_lock_acquire_wait "$lock" || return 1
   reconcile_direct_child_locked "$id" "$meta" "$self" "$timeout" || rc=$?
   receipt=${RECONCILE_AUTO_TEARDOWN_RECORD:-}
-  fm_lock_release "$lock"
   if [ "$rc" -eq 0 ] && [ -n "$receipt" ]; then
-    automatic_teardown "$id" "$receipt" || rc=$?
+    printf '%s\t%s\t%s\n' "$id" "$(record_value "$receipt" incarnation)" "$receipt" >&3 || rc=$?
   fi
+  fm_lock_release "$lock"
   RECONCILE_AUTO_TEARDOWN_RECORD=
   return "$rc"
 
@@ -686,11 +685,17 @@ case "$mode" in
     # process-group kill is only the backstop for a scan wedged outside every
     # bounded section (an unbounded lock wait), so it fires one second after
     # the deadline instead of racing the clean bounded exit it exists to guard.
-    if fm_run_timed $((FM_INACTIVE_RECONCILE_BUDGET_SECS + 1)) "$0" _scan-locked "$startup"; then
-      :
-    elif [ "$?" -ne 124 ]; then
-      exit 1
-    fi
+    mkdir -p "$STATE" || exit 1
+    cleanup_requests=$(mktemp "$STATE/.inactive-cleanup.XXXXXX") || exit 1
+    trap 'rm -f "$cleanup_requests"' EXIT
+    scan_rc=0
+    fm_run_timed $((FM_INACTIVE_RECONCILE_BUDGET_SECS + 1)) "$0" _scan-locked "$startup" \
+      3> "$cleanup_requests" || scan_rc=$?
+    while IFS=$'\t' read -r id incarnation receipt; do
+      valid_id "$id" && valid_id "$incarnation" && [ -n "$receipt" ] || continue
+      automatic_teardown "$id" "$receipt" "$incarnation"
+    done < "$cleanup_requests"
+    [ "$scan_rc" -eq 0 ] || [ "$scan_rc" -eq 124 ] || exit 1
     ;;
   _scan-locked)
     [ "$#" -eq 2 ] || exit 2

@@ -844,6 +844,42 @@ test_automatic_teardown_invokes_standard_cleanup() {
   pass "terminal reconciliation executes standard teardown after recording the receipt"
 }
 
+test_slow_teardown_outlives_classification_budget() {
+  local outcome started elapsed
+  for outcome in complete refused; do
+    make_world "slow-teardown-$outcome"
+    write_child "$MAIN" child 'done: green'
+    if [ "$outcome" = refused ]; then
+      awk '{ sub(/^kind=ship$/, "kind=scout"); print }' "$MAIN/state/child.meta" > "$MAIN/state/child.meta.tmp"
+      mv "$MAIN/state/child.meta.tmp" "$MAIN/state/child.meta"
+      age "$MAIN/state/child.meta"
+    fi
+    mkdir -p "$WORLD/root/bin"
+    cat > "$WORLD/root/bin/fm-guard.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 3
+printf 'guard-finished\n' > "$FM_HOME/slow-guard.log"
+SH
+    chmod +x "$WORLD/root/bin/fm-guard.sh"
+    started=$(date +%s)
+    FM_INACTIVE_RECONCILE_BUDGET_SECS=1 FM_FAKE_CREW_STATE='done' \
+      run_reconcile "$MAIN" --startup > "$WORLD/reconcile.out" 2>&1
+    elapsed=$(( $(date +%s) - started ))
+    [ "$elapsed" -ge 3 ] && [ -f "$MAIN/slow-guard.log" ] || fail "classification timeout interrupted standard teardown: $(cat "$WORLD/reconcile.out")"
+    [ "$(outcome_count "$MAIN" pending)" = 1 ] || fail "slow teardown lost terminal receipt"
+    [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] || fail "slow teardown lost presentation wake"
+    if [ "$outcome" = complete ]; then
+      [ ! -e "$MAIN/state/child.meta" ] || fail "slow standard teardown did not finish cleanup"
+      grep -Fxq 'receipt-present' "$MAIN/endpoint-cleanup.log" || fail "slow cleanup preceded durable receipt"
+    else
+      grep -Fq 'scout task child has no report' "$WORLD/reconcile.out" || fail "slow teardown did not reach its safety refusal"
+      [ -f "$MAIN/state/child.meta" ] && [ -f "$MAIN/state/child.status" ] || fail "slow safety refusal removed durable task state"
+      [ ! -e "$MAIN/endpoint-cleanup.log" ] || fail "slow safety refusal killed the endpoint"
+    fi
+  done
+  pass "standard teardown can finish or refuse beyond the classification timeout"
+}
+
 test_automatic_teardown_refusal_preserves_task() {
   local attempt
   make_world automatic-teardown-refused
@@ -921,6 +957,7 @@ test_teardown_checks_expected_generation_under_lock() {
 }
 
 test_automatic_teardown_invokes_standard_cleanup
+test_slow_teardown_outlives_classification_budget
 test_automatic_teardown_refusal_preserves_task
 test_failed_presentation_preserves_task_until_retry
 test_teardown_checks_expected_generation_under_lock
