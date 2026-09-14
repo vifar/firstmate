@@ -724,15 +724,20 @@ watch_record_key_from_file() {  # <basename>
 }
 
 retire_dead_window_records() {
-  local w backend label key live_keys='|' file base cursor='' processed=0
-  while IFS= read -r w; do
-    backend=$(window_backend "$w")
-    label=$(window_label "$w")
-    if fm_backend_target_exists "$backend" "$w" "$label"; then
+  local w backend key meta task verdict live_keys='|' file base cursor='' processed=0
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || [ -L "$meta" ] || continue
+    task=${meta##*/}
+    task=${task%.meta}
+    (fm_backend_validate_task_endpoint "$meta" "$task") >/dev/null 2>&1 || return 0
+    w=$(fm_backend_target_of_meta "$meta") || return 0
+    backend=$(fm_backend_of_meta "$meta")
+    verdict=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null) || verdict=unreadable
+    if [ "$verdict" != missing ]; then
       key=$(window_key "$w")
       case "$live_keys" in *"|$key|"*) ;; *) live_keys="$live_keys$key|" ;; esac
     fi
-  done < <(recorded_windows)
+  done
   [ ! -f "$STATE/.watch-record-sweep-cursor" ] \
     || IFS= read -r cursor < "$STATE/.watch-record-sweep-cursor" \
     || cursor=''

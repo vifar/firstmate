@@ -4791,11 +4791,12 @@ test_paused_until_that_passed_is_rechecked_before_the_cadence() {
 }
 
 test_watcher_retires_dead_window_records_and_preserves_live_key() {
-  local dir state fakebin out pid marker i
-  dir=$(make_case watch-record-sweep); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  local dir state fakebin marker
+  dir=$(make_case watch-record-sweep); state="$dir/state"; fakebin="$dir/fakebin"
   fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then printf 'fm-live\n'; exit 0; fi
 if [ "${1:-}" = display-message ]; then
   while [ "$#" -gt 0 ]; do
     if [ "$1" = -t ] && [ "${2:-}" = test:fm-live ]; then exit 0; fi
@@ -4811,15 +4812,9 @@ SH
     : > "$state/.$marker-test_fm-live"
     : > "$state/.$marker-test_fm-dead"
   done
-  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
-    FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
-  pid=$!
-  for ((i=0; i<300; i++)); do
-    [ -e "$state/.hash-test_fm-dead" ] || break
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  reap "$pid"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; retire_dead_window_records' _ "$WATCH" \
+    || fail "watcher record sweep failed"
   for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
     assert_absent "$state/.$marker-test_fm-dead" "watcher left dead-window .$marker state"
     assert_present "$state/.$marker-test_fm-live" "watcher removed live-window .$marker state"
@@ -4871,12 +4866,61 @@ test_watcher_record_sweep_is_bounded_and_idempotent() {
   pass "watcher record retirement is bounded, resumable, and idempotent"
 }
 
+test_watcher_record_sweep_requires_proven_absence() {
+  local dir state fakebin mode marker
+  dir=$(make_case watch-record-proof); state="$dir/state"; fakebin="$dir/fakebin"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then
+  case "$FM_TEST_INVENTORY" in
+    error) printf 'temporary inventory failure\n' >&2; exit 1 ;;
+    unavailable) exit 127 ;;
+    missing) printf 'fm-someone-else\n'; exit 0 ;;
+    live) printf 'fm-live\n'; exit 0 ;;
+  esac
+fi
+exit 1
+SH
+  chmod +x "$fakebin/tmux"
+  for mode in error unavailable live missing malformed unknown unverified; do
+    fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
+    case "$mode" in
+      malformed) printf 'window=test:fm-other\n' >> "$state/live.meta" ;;
+      unknown) printf 'backend=unknown\n' >> "$state/live.meta" ;;
+      unverified)
+        fm_write_meta "$state/live.meta" "window=fm-live" "endpoint_task_id=live" \
+          "terminal=test_fm-live" "backend=orca" "orca_worktree_id=wt-live" \
+          "worktree=$dir/wt" "project=$dir/project"
+        ;;
+    esac
+    for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+      printf 'preserve-%s\n' "$marker" > "$state/.$marker-test_fm-live"
+    done
+    PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_TEST_INVENTORY="$mode" \
+      bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
+      || fail "watcher sweep failed for $mode inventory"
+    for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+      if [ "$mode" = missing ]; then
+        assert_absent "$state/.$marker-test_fm-live" "positive absence left .$marker state"
+      else
+        [ "$(cat "$state/.$marker-test_fm-live" 2>/dev/null)" = "preserve-$marker" ] \
+          || fail "$mode inventory changed .$marker state without proof of absence"
+      fi
+    done
+  done
+  pass "watcher preserves uncertain records and retires only proven missing endpoints"
+}
+
 if [ "${1:-}" = --watch-record-sweep ]; then
   test_watcher_retires_dead_window_records_and_preserves_live_key
   test_watcher_record_sweep_is_bounded_and_idempotent
+  test_watcher_record_sweep_requires_proven_absence
   exit 0
 fi
 
+test_watcher_retires_dead_window_records_and_preserves_live_key
+test_watcher_record_sweep_is_bounded_and_idempotent
+test_watcher_record_sweep_requires_proven_absence
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
 test_status_span_respects_decision_closure
