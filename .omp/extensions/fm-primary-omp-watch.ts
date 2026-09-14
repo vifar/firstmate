@@ -118,6 +118,7 @@ type SessionGeneration = {
   restoring: boolean;
   seq: number;
   pendingActionables: PendingActionableClose[];
+  replacementActionables: Set<string>;
   cleanupFailure: string;
   // Main follow-ups omp has accepted but not yet consumed, by pending token.
   // Never cleared at shutdown: a delivery continuation that runs after the
@@ -499,6 +500,7 @@ function createGeneration(): SessionGeneration {
     restoring: false,
     seq: 0,
     pendingActionables: [],
+    replacementActionables: new Set(),
     cleanupFailure: "",
     unconsumedWakes: new Map(),
     deferredClose: null,
@@ -585,7 +587,7 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement. Watcher continuity is extension-owned.`,
     );
-    if (pending && !handoffWorkIsLive(pending)) return true;
+    if (pending && owner.replacementActionables.has(pending.token) && !handoffWorkIsLive(pending)) return true;
     if (pending) owner.unconsumedWakes.set(pending.token, { content, pending });
     try {
       await pi.sendUserMessage(content, { deliverAs: "followUp" });
@@ -689,9 +691,11 @@ export default function (pi: ExtensionAPI) {
   function enqueuePendingActionable(
     owner: SessionGeneration,
     pending: PendingActionableClose,
+    replacement = false,
   ): void {
     if (owner.pendingActionables.some((item) => item.token === pending.token)) return;
     owner.pendingActionables.push(pending);
+    if (replacement) owner.replacementActionables.add(pending.token);
     if (owner.stopping && owner.replacement) {
       let replacementPending = pending;
       try {
@@ -713,6 +717,7 @@ export default function (pi: ExtensionAPI) {
 
   function finishPendingActionable(owner: SessionGeneration, pending: PendingActionableClose): void {
     clearReplacementHandoff(pending);
+    owner.replacementActionables.delete(pending.token);
     const index = owner.pendingActionables.findIndex((item) => item.token === pending.token);
     if (index >= 0) owner.pendingActionables.splice(index, 1);
     owner.cleanupFailure = "";
@@ -758,7 +763,7 @@ export default function (pi: ExtensionAPI) {
           (item) => !item.delivered && !owner.unconsumedWakes.has(item.token),
         );
         if (!pending) break;
-        if (!handoffWorkIsLive(pending)) {
+        if (owner.replacementActionables.has(pending.token) && !handoffWorkIsLive(pending)) {
           finishPendingActionable(owner, pending);
           continue;
         }
@@ -854,7 +859,7 @@ export default function (pi: ExtensionAPI) {
 
   const receiveReplacementActionable: ReplacementActionableReceiver = (pending) => {
     if (!generationIsLive(generation)) return;
-    enqueuePendingActionable(generation, pending);
+    enqueuePendingActionable(generation, pending, true);
     void processPendingActionables(generation);
   };
 
@@ -1096,7 +1101,7 @@ export default function (pi: ExtensionAPI) {
     }
     const inProcessPending = replacementCoordinator.pending.splice(0);
     for (const actionable of eligibleHandoff([...pending, ...inProcessPending])) {
-      enqueuePendingActionable(owner, actionable);
+      enqueuePendingActionable(owner, actionable, true);
     }
     if (owner.pendingActionables.length > 0) {
       if (loadFailure) surfaceFailure(owner, loadFailure);

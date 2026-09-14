@@ -553,10 +553,11 @@ printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
 if [ ! -e "${FM_HOME:?}/state/.e2e-fired" ]; then
   : > "$FM_HOME/state/.e2e-fired"
   sleep 1
-  printf 'signal: omp-e2e done\n'
+  printf 'check: %s/state/merged.check.sh: merged\n' "$FM_HOME"
   exit 0
 fi
-sleep 30
+: > "$FM_HOME/state/.e2e-rearmed"
+exec sleep 30
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
@@ -585,7 +586,8 @@ const again = await tool.execute();
 if (!/^watcher: unchanged - omp extension already owns an arm child/.test(again.content[0].text)) throw new Error(`redundant arm was not an ownership no-op: ${again.content[0].text}`);
 await new Promise((r) => setTimeout(r, 2500));
 if (sent.length !== 1) throw new Error(`expected one follow-up wake, saw ${sent.length}: ${JSON.stringify(sent)}`);
-if (!sent[0].m.startsWith("⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-e2e done")) throw new Error(`unexpected wake text: ${sent[0].m}`);
+if (!sent[0].m.startsWith(`⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: ${process.env.FM_HOME}/state/merged.check.sh: merged`)) throw new Error(`unexpected wake text: ${sent[0].m}`);
+if (!existsSync(`${process.env.FM_HOME}/state/.e2e-rearmed`)) throw new Error("ordinary close did not re-arm after its retired check script was reported");
 if (!sent[0].m.includes("After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement.")) throw new Error(`wake did not require a proactive captain-facing summary before acknowledgement: ${sent[0].m}`);
 if (sent[0].o?.deliverAs !== "followUp") throw new Error("wake must be delivered as a follow-up");
 // The wake is consumed when omp starts the next run with that exact prompt.
@@ -612,7 +614,7 @@ test_watch_extension_bounds_replacement_handoff() {
 #!/usr/bin/env bash
 case "$*" in *--handling-delivered*) exit 0 ;; esac
 printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
-sleep 30
+exec sleep 30
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
@@ -710,7 +712,7 @@ case "$*" in *--handling-delivered*) exit 0 ;; esac
 touch "$FM_HOME/state/arm-waiting"
 while [ ! -e "$FM_HOME/state/arm-release" ]; do sleep 0.02; done
 printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\\n' "$$"
-sleep 30
+exec sleep 30
 `);
 const waitUntil = async (predicate, label) => {
   const deadline = Date.now() + 2000;
