@@ -4811,6 +4811,7 @@ SH
   for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
     : > "$state/.$marker-test_fm-live"
     : > "$state/.$marker-test_fm-dead"
+    touch -t 200001010000 "$state/.$marker-test_fm-live" "$state/.$marker-test_fm-dead"
   done
   PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
     bash -c '. "$1"; retire_dead_window_records' _ "$WATCH" \
@@ -4828,6 +4829,7 @@ test_watcher_record_sweep_is_bounded_and_idempotent() {
   for ((i=1; i<=65; i++)); do
     printf -v remaining '%02d' "$i"
     : > "$state/.hash-dead-$remaining"
+    touch -t 200001010000 "$state/.hash-dead-$remaining"
   done
   PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
     FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
@@ -4895,6 +4897,7 @@ SH
     esac
     for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
       printf 'preserve-%s\n' "$marker" > "$state/.$marker-test_fm-live"
+      touch -t 200001010000 "$state/.$marker-test_fm-live"
     done
     PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_TEST_INVENTORY="$mode" \
       bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
@@ -4911,16 +4914,69 @@ SH
   pass "watcher preserves uncertain records and retires only proven missing endpoints"
 }
 
+test_watcher_record_sweep_grace_and_recheck() {
+  local dir state fakebin mode
+  dir=$(make_case watch-record-grace); state="$dir/state"; fakebin="$dir/fakebin"
+  : > "$state/.hash-fresh"
+  : > "$state/.count-old"
+  touch -t 200001010000 "$state/.count-old"
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; retire_dead_window_records' _ "$WATCH" || fail "grace sweep failed"
+  assert_present "$state/.hash-fresh" "grace period did not protect a new record"
+  assert_absent "$state/.count-old" "grace period kept an old absent record"
+  touch -t 200001010000 "$state/.hash-fresh"
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
+    || fail "expired grace sweep failed"
+  assert_absent "$state/.hash-fresh" "expired grace record did not retire"
+  fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then
+  n=$(cat "$FM_HOME/probes" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  printf '%s\n' "$n" > "$FM_HOME/probes"
+  if [ "$n" -eq 1 ]; then
+    printf 'fm-other\n'
+  elif [ "$FM_TEST_RECHECK" = refresh ]; then
+    touch "$FM_HOME/state/.hash-test_fm-live"
+    printf 'fm-other\n'
+  else
+    printf 'fm-live\n'
+  fi
+  exit 0
+fi
+exit 1
+SH
+  chmod +x "$fakebin/tmux"
+  for mode in live refresh; do
+    : > "$state/.watch-record-sweep-cursor"
+    printf '0\n' > "$dir/probes"
+    : > "$state/.count-test_fm-live"
+    : > "$state/.hash-test_fm-live"
+    touch -t 200001010000 "$state/.count-test_fm-live" "$state/.hash-test_fm-live"
+    PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_TEST_RECHECK="$mode" \
+      bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
+      || fail "$mode recheck sweep failed"
+    assert_absent "$state/.count-test_fm-live" "initial proven absence did not retire old record"
+    assert_present "$state/.hash-test_fm-live" "$mode change before unlink did not protect record"
+    [ "$(cat "$dir/probes")" -ge 2 ] || fail "absence was not rechecked for each unlink"
+  done
+  pass "watcher honors grace and rechecks absence and record age before unlink"
+}
+
 if [ "${1:-}" = --watch-record-sweep ]; then
   test_watcher_retires_dead_window_records_and_preserves_live_key
   test_watcher_record_sweep_is_bounded_and_idempotent
   test_watcher_record_sweep_requires_proven_absence
+  test_watcher_record_sweep_grace_and_recheck
   exit 0
 fi
 
 test_watcher_retires_dead_window_records_and_preserves_live_key
 test_watcher_record_sweep_is_bounded_and_idempotent
 test_watcher_record_sweep_requires_proven_absence
+test_watcher_record_sweep_grace_and_recheck
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
 test_status_span_respects_decision_closure

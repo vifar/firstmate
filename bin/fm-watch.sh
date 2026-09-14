@@ -723,21 +723,33 @@ watch_record_key_from_file() {  # <basename>
   esac
 }
 
-retire_dead_window_records() {
-  local w backend key meta task verdict live_keys='|' file base cursor='' processed=0
+watch_record_past_grace() {
+  local file=$1 mtime now
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  mtime=$(stat_mtime "$file") || return 1
+  case "$mtime" in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s) || return 1
+  [ "$((now - mtime))" -gt 1800 ]
+}
+
+watch_record_window_absent() {
+  local key=$1 w backend meta task verdict
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     task=${meta##*/}
     task=${task%.meta}
-    (fm_backend_validate_task_endpoint "$meta" "$task") >/dev/null 2>&1 || return 0
-    w=$(fm_backend_target_of_meta "$meta") || return 0
+    (fm_backend_validate_task_endpoint "$meta" "$task") >/dev/null 2>&1 || return 1
+    w=$(fm_backend_target_of_meta "$meta") || return 1
+    [ "$(window_key "$w")" = "$key" ] || continue
     backend=$(fm_backend_of_meta "$meta")
-    verdict=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null) || verdict=unreadable
-    if [ "$verdict" != missing ]; then
-      key=$(window_key "$w")
-      case "$live_keys" in *"|$key|"*) ;; *) live_keys="$live_keys$key|" ;; esac
-    fi
+    verdict=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null) || return 1
+    [ "$verdict" = missing ] || return 1
   done
+  return 0
+}
+
+retire_dead_window_records() {
+  local key file base cursor='' processed=0
   [ ! -f "$STATE/.watch-record-sweep-cursor" ] \
     || IFS= read -r cursor < "$STATE/.watch-record-sweep-cursor" \
     || cursor=''
@@ -746,7 +758,11 @@ retire_dead_window_records() {
     base=${file##*/}
     [ -z "$cursor" ] || [[ $base > $cursor ]] || continue
     key=$(watch_record_key_from_file "$base") || continue
-    case "$live_keys" in *"|$key|"*) ;; *) rm -f -- "$file" || return 1 ;; esac
+    if watch_record_past_grace "$file" \
+      && watch_record_window_absent "$key" \
+      && watch_record_past_grace "$file"; then
+      rm -f -- "$file" || return 1
+    fi
     processed=$((processed + 1))
     printf '%s\n' "$base" > "$STATE/.watch-record-sweep-cursor" || return 1
     [ "$processed" -lt 64 ] || return 0
