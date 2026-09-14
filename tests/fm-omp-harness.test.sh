@@ -736,6 +736,16 @@ if (sent.length !== beforeRestoration) throw new Error("work finished during res
 if (existsSync(handoffPath)) throw new Error("finished work must leave the replacement handoff store");
 await handlers.get("session_shutdown")({}, {});
 if (existsSync(handoffPath)) throw new Error("shutdown resurrected work dropped at the send boundary");
+const coordinator = globalThis.__firstmateOmpWatchReplacements.get(handoffPath);
+for (let i = 0; i < 40; i += 1) coordinator.pending.push(record(0, 800 + i));
+const beforeInProcess = sent.length;
+await handlers.get("session_start")({ type: "session_start" }, {});
+await waitUntil(() => sent.length >= beforeInProcess + 32, "bounded in-process replay");
+if (sent.length !== beforeInProcess + 32) throw new Error(`in-process replacement replay was not capped: ${sent.length - beforeInProcess}`);
+const inProcessSeqs = sent.slice(beforeInProcess).map((wake) => Number(/handoff-case-([0-9]+)/.exec(wake.m)[1]));
+if (inProcessSeqs[0] !== 808 || inProcessSeqs.at(-1) !== 839) throw new Error(`in-process replacement kept the wrong bounded records: ${inProcessSeqs.join(",")}`);
+await handlers.get("session_shutdown")({}, {});
+if (readHandoff().length !== 32) throw new Error("shutdown must persist only the bounded in-process replacement set");
 process.exit(0);
 EOF
 )
