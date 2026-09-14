@@ -1991,6 +1991,46 @@ test_teardown_retires_only_task_watcher_records() {
   pass "teardown retires only the task's watcher records"
 }
 
+test_orca_teardown_retires_terminal_watcher_records() {
+  local case_dir key window_key marker rc
+  case_dir=$(make_case orca-watcher-record-cleanup)
+  write_meta "$case_dir" local-only ship
+  awk '{ if ($0 ~ /^window=/) print "window=fm-task-x1"; else print }' \
+    "$case_dir/state/task-x1.meta" > "$case_dir/state/task-x1.meta.next"
+  mv "$case_dir/state/task-x1.meta.next" "$case_dir/state/task-x1.meta"
+  cat >> "$case_dir/state/task-x1.meta" <<'EOF'
+backend=orca
+terminal=orca-terminal.task.x1
+orca_worktree_id=orca-worktree-task-x1
+EOF
+  cat > "$case_dir/fakebin/orca" <<EOF
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "worktree show") printf '{"ok":true,"result":{"worktree":{"id":"orca-worktree-task-x1","path":"%s"}}}\\n' "$case_dir/wt" ;;
+  *) printf '{"ok":true,"result":{}}\\n' ;;
+esac
+EOF
+  chmod +x "$case_dir/fakebin/orca"
+  key=$(printf '%s' 'orca-terminal.task.x1' | tr ':/.' '___')
+  window_key=$(printf '%s' 'firstmate:fm-task-x1' | tr ':/.' '___')
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+    : > "$case_dir/state/.$marker-$key"
+    : > "$case_dir/state/.$marker-$window_key"
+  done
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "orca-watcher-record-cleanup: teardown should succeed: $(cat "$case_dir/stderr")"
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+    assert_absent "$case_dir/state/.$marker-$key" \
+      "orca-watcher-record-cleanup: teardown left the terminal-keyed .$marker record"
+    assert_present "$case_dir/state/.$marker-$window_key" \
+      "orca-watcher-record-cleanup: teardown removed raw-window .$marker state"
+  done
+  pass "Orca teardown retires terminal-keyed watcher records"
+}
+
 test_teardown_coordinates_with_watcher_capture() (
   local case_dir pid rc i key
   case_dir=$(make_case watcher-capture-race)
@@ -3753,6 +3793,7 @@ EOF
 
 if [ "${1:-}" = --watcher-records ]; then
   test_teardown_retires_only_task_watcher_records
+  test_orca_teardown_retires_terminal_watcher_records
   test_teardown_watcher_record_cleanup_is_idempotent_when_absent
   test_teardown_coordinates_with_watcher_capture
   exit 0
@@ -3770,6 +3811,7 @@ test_secondmate_pr_registration_publishes_ready_line
 test_secondmate_home_teardown_delivers_final_line_or_refuses
 test_teardown_missing_busy_sidecar_completes
 test_teardown_retires_only_task_watcher_records
+test_orca_teardown_retires_terminal_watcher_records
 test_teardown_watcher_record_cleanup_is_idempotent_when_absent
 test_teardown_coordinates_with_watcher_capture
 test_herdr_teardown_clears_escalation_marker
