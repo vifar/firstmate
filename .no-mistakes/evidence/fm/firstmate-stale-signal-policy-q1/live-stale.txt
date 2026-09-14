@@ -1,0 +1,17 @@
+CURRENT WORKER STATE
+state: unknown · source: none · worktree gone (torn down?)
+
+ESCALATION BUFFER
+stale + current worker state is unresolved for oldpause; recovery decision: inspect the recorded endpoint and worktree before relaunching
+stale pane is not associated with a recorded worker; recovery decision: inspect the unidentified pane before relaunching
+
+DAEMON LOG
+[2026-09-14T07:01:30-0500] daemon starting (pid 98266); target=phase:supervisor; target_source=FM_SUPERVISOR_TARGET; backend=tmux; backend_source=FM_SUPERVISOR_BACKEND; afk=on; inject_skip='heartbeat'; stale_escalate=240s; batch=9999s
+[2026-09-14T07:01:32-0500] wake: check: rearm-resurface
+[2026-09-14T07:01:35-0500] escalate: stale: phase:fm-oldpause -> stale + current worker state is unresolved for oldpause; recovery decision: inspect the recorded endpoint and worktree before relaunching
+[2026-09-14T07:01:35-0500] escalate: stale: phase:fm-legacy -> stale pane is not associated with a recorded worker; recovery decision: inspect the unidentified pane before relaunching
+
+DURABLE QUEUE STATE
+.wake-queue
+.wake-queue.seq
+2
