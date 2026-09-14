@@ -581,13 +581,17 @@ export default function (pi: ExtensionAPI) {
     owner: SessionGeneration,
     message: string,
     pending?: PendingActionableClose,
+    failure = "",
   ): Promise<boolean> {
     if (!generationIsLive(owner)) return false;
     const content = encodeFirstmateOperationalInput(
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement. Watcher continuity is extension-owned.`,
     );
-    if (pending && owner.replacementActionables.has(pending.token) && !handoffWorkIsLive(pending)) return true;
+    if (pending && owner.replacementActionables.has(pending.token) && !handoffWorkIsLive(pending)) {
+      if (failure) surfaceFailure(owner, failure);
+      return true;
+    }
     if (pending) owner.unconsumedWakes.set(pending.token, { content, pending });
     try {
       await pi.sendUserMessage(content, { deliverAs: "followUp" });
@@ -666,6 +670,7 @@ export default function (pi: ExtensionAPI) {
     message: string,
     pending: PendingActionableClose,
     recovery?: { generation: string; watcherPid: string },
+    failure = "",
   ): Promise<boolean> {
     if (!generationIsLive(owner)) return false;
     if (recovery) {
@@ -675,11 +680,11 @@ export default function (pi: ExtensionAPI) {
         if (!pidAlive(watcherPid)) {
           await retireArm(owner.child);
         }
-        return await sendWake(owner, `${message}\n\n${confirmed.detail}`, pending);
+        return await sendWake(owner, `${message}\n\n${confirmed.detail}`, pending, [failure, confirmed.detail].filter(Boolean).join("\n\n"));
       }
     }
     // No supervision branch on omp: every actionable wake goes to main.
-    return await sendWake(owner, message, pending);
+    return await sendWake(owner, message, pending, failure);
   }
 
   function surfaceFailure(owner: SessionGeneration, message: string): void {
@@ -801,7 +806,7 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           const message = restoration.failure ? `${pending.message}\n\n${restoration.failure}` : pending.message;
-          const delivered = await deliverActionableWake(owner, message, pending, restoration.recovery);
+          const delivered = await deliverActionableWake(owner, message, pending, restoration.recovery, restoration.failure);
           if (!delivered) {
             settleClaim("failed");
             releaseClaim();

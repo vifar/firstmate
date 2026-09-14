@@ -748,6 +748,35 @@ const inProcessSeqs = sent.slice(beforeInProcess).map((wake) => Number(/handoff-
 if (inProcessSeqs[0] !== 808 || inProcessSeqs.at(-1) !== 839) throw new Error(`in-process replacement kept the wrong bounded records: ${inProcessSeqs.join(",")}`);
 await handlers.get("session_shutdown")({}, {});
 if (readHandoff().length !== 32) throw new Error("shutdown must persist only the bounded in-process replacement set");
+for (const mode of ["restoration", "confirmation"]) {
+  unlinkSync(`${home}/state/arm-waiting`);
+  unlinkSync(`${home}/state/arm-release`);
+  writeFileSync(`${process.env.FM_ROOT_OVERRIDE}/bin/fm-watch-arm.sh`, `#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 1 ;; esac
+touch "$FM_HOME/state/arm-waiting"
+while [ ! -e "$FM_HOME/state/arm-release" ]; do sleep 0.02; done
+${mode === "restoration" ? "exit 1" : "printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\\n' \"$$\""}
+exec sleep 30
+`);
+  const failedPath = `${home}/state/finished-before-${mode}.status`;
+  writeFileSync(failedPath, "busy\n");
+  writeFileSync(`${home}/state/finished-before-${mode}.meta`, "runtime\n");
+  const failedRecord = record(0, mode === "restoration" ? 900 : 901);
+  failedRecord.message = `signal: ${failedPath}`;
+  writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: [failedRecord] })}\n`);
+  const beforeFailure = sent.length;
+  await handlers.get("session_start")({ type: "session_start" }, {});
+  await waitUntil(() => existsSync(`${home}/state/arm-waiting`), `${mode} arm startup`);
+  unlinkSync(failedPath);
+  writeFileSync(`${home}/state/arm-release`, "ready\n");
+  await waitUntil(() => !existsSync(handoffPath), `${mode} stale handoff cleanup`);
+  const notices = sent.slice(beforeFailure);
+  const expectedFailure = mode === "restoration" ? "could not restore watcher continuity after 1 retries" : "handling delivery confirmation was rejected";
+  if (notices.length !== 1 || !notices[0].m.includes(expectedFailure)) throw new Error(`${mode} failure was not surfaced independently: ${JSON.stringify(notices)}`);
+  if (notices[0].m.includes(failedPath)) throw new Error(`${mode} failure replayed stale work`);
+  await handlers.get("session_shutdown")({}, {});
+  if (existsSync(handoffPath)) throw new Error(`${mode} failure resurrected stale work`);
+}
 process.exit(0);
 EOF
 )
