@@ -780,7 +780,7 @@ make_integration_base_case() {  # <name> <id> [<integration-branch>]
   git -C "$project" remote add origin "file://$origin"
   # A branch that exists only in this repository and was never pushed: the bare
   # origin is cloned above without it, so the recorded name resolves to no
-  # remote-tracking ref and the launch must fall back to this local branch.
+  # remote-tracking ref and the launch must refuse this local-only branch.
   git -C "$project" checkout --quiet --detach HEAD
   printf 'local only base work\n' > "$project/local-only.txt"
   git -C "$project" add local-only.txt
@@ -850,24 +850,25 @@ test_recorded_integration_base_refreshes_before_branching() {
   pass "a recorded integration base refreshes the pooled worktree from its fetched remote tip"
 }
 
-test_recorded_base_falls_back_to_a_local_only_branch() {
-  local rec id out status
+test_recorded_base_refuses_a_local_only_branch() {
+  local rec id out status before
   id='pool-local-base-r1'
   rec=$(make_integration_base_case local-base "$id")
   read_integration_case "$rec"
   printf 'local-only\n' > "$HOME_DIR/config/project-base-controller"
   git -C "$PROJECT_DIR" show-ref --verify --quiet refs/remotes/origin/local-only \
-    && fail "fixture pushed the local-only branch, so this case cannot prove the fallback"
+    && fail "fixture pushed the local-only branch, so this case cannot prove refusal"
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
 
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)
   status=$?
-  expect_code 0 "$status" "spawn should fall back to a local branch of the recorded name"$'\n'"$out"
-  assert_contains "$out" "base=local-only" "spawn did not report the local base it resolved"
-  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$LOCAL_ONLY_TIP" ] \
-    || fail "spawn did not reset to the local branch of the recorded name"
-  assert_grep 'local only base work' "$POOL_DIR/local-only.txt" \
-    "the worktree does not carry the local branch's content"
-  pass "a recorded base with no remote branch falls back to the local branch"
+  [ "$status" -ne 0 ] || fail "spawn launched from a recorded base that exists only locally"
+  assert_contains "$out" "base branch 'local-only' does not exist on remote origin" \
+    "spawn did not name the missing remote branch"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "spawn moved HEAD while refusing a local-only recorded base"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "refused spawn published task metadata"
+  pass "a recorded base that exists only locally refuses the pooled worktree"
 }
 
 test_unrecorded_project_still_uses_origin_default_branch() {
@@ -901,7 +902,7 @@ test_unresolvable_recorded_base_refuses_pool() {
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn launched from a recorded base that resolves to no ref"
-  assert_contains "$out" "base branch 'ghost' does not resolve" \
+  assert_contains "$out" "base branch 'ghost' does not exist on remote origin" \
     "spawn did not name the recorded base as unresolvable"
   [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
     || fail "spawn moved HEAD while refusing an unresolvable base"
@@ -920,7 +921,7 @@ test_unresolvable_recorded_base_refuses_pool() {
   pass "an unresolvable or malformed recorded base refuses the pooled worktree"
 }
 
-test_brief_recorded_base_outranks_the_config_file() {
+test_brief_cannot_override_the_config_file() {
   local rec id id2 out status
   id='pool-brief-base-r1'
   id2='pool-brief-base-precedence-r1'
@@ -931,14 +932,13 @@ test_brief_recorded_base_outranks_the_config_file() {
   # scaffolds the real thing, and fm-brief.sh refuses to overwrite a brief.
   rm -f "$HOME_DIR/data/$id/brief.md"
 
-  # Scaffold a brief against the recorded base, then launch from it. The recorded
-  # line is what the worker was told it would start from, and the spawn reads that
-  # same line first, so the two records cannot drift.
+  # Scaffold a brief against the recorded base, then launch from project config.
   out=$(FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" "$id" controller --scout 2>&1)
   status=$?
   expect_code 0 "$status" "scaffolding a scout brief over a recorded base should succeed"$'\n'"$out"
-  assert_grep "Launch base: $INTEGRATION_BRANCH" "$HOME_DIR/data/$id/brief.md" \
-    "the scaffolded brief did not record the base it will be launched from"
+  if grep -q '^Launch base:' "$HOME_DIR/data/$id/brief.md"; then
+    fail "the scaffolded brief exposed a machine base override"
+  fi
   assert_grep "detached HEAD on a clean \`$INTEGRATION_BRANCH\` tip" "$HOME_DIR/data/$id/brief.md" \
     "the brief's Setup section did not state the recorded base"
   # Firstmate fills both Task subsections after scaffolding, because a spawn
@@ -950,25 +950,24 @@ test_brief_recorded_base_outranks_the_config_file() {
 
   out=$(run_spawn "$id" --scout)
   status=$?
-  expect_code 0 "$status" "spawn should launch the base its brief records"$'\n'"$out"
+  expect_code 0 "$status" "spawn should launch the recorded project base"$'\n'"$out"
   assert_contains "$out" "base=$INTEGRATION_BRANCH" \
-    "spawn did not report the base the brief records"
+    "spawn did not report the recorded project base"
   [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$INTEGRATION_TIP" ] \
-    || fail "spawn did not reset to the base the brief records"
+    || fail "spawn did not reset to the recorded project base"
 
-  # A brief that records its own base outranks this home's config file, because the
-  # brief is the decision the worker was given rather than a default to re-derive.
+  # A stray legacy machine line in a brief cannot override this home's config file.
   fm_test_spawn_brief "$HOME_DIR" "$id2"
   printf 'Launch base: main\n' >> "$HOME_DIR/data/$id2/brief.md"
   out=$(run_spawn "$id2" --scout)
   status=$?
-  expect_code 0 "$status" "spawn should honour the base its own brief records"$'\n'"$out"
-  assert_contains "$out" "base=main" "spawn ignored the base recorded in the brief"
-  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$DEFAULT_TIP" ] \
-    || fail "spawn used the config file's base instead of the base recorded in the brief"
+  expect_code 0 "$status" "spawn should ignore a base line in its brief"$'\n'"$out"
+  assert_contains "$out" "base=$INTEGRATION_BRANCH" "spawn did not use the recorded project base"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$INTEGRATION_TIP" ] \
+    || fail "spawn let the brief override the recorded project base"
 
   # A malformed config refuses the scaffold as well, so a bad file never renders a
-  # brief claiming a base the spawn would refuse to use.
+  # brief claiming a base that spawn would refuse to use.
   printf 'dev release\n' > "$HOME_DIR/config/project-base-controller"
   out=$(FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" brief-base-malformed controller --scout 2>&1)
   status=$?
@@ -977,7 +976,7 @@ test_brief_recorded_base_outranks_the_config_file() {
     "the scaffold refusal did not name the malformed recorded-base file"
   [ ! -e "$HOME_DIR/data/brief-base-malformed/brief.md" ] \
     || fail "the refused scaffold published a brief"
-  pass "a brief records the base it launches from and outranks the recorded config file"
+  pass "a brief states its setup base but cannot override project configuration"
 }
 
 test_remote_seeded_home_spawns_from_treehouse_pool
@@ -986,10 +985,10 @@ test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_non_main_default_branch_refreshes_before_branching
 test_recorded_integration_base_refreshes_before_branching
-test_recorded_base_falls_back_to_a_local_only_branch
+test_recorded_base_refuses_a_local_only_branch
 test_unrecorded_project_still_uses_origin_default_branch
 test_unresolvable_recorded_base_refuses_pool
-test_brief_recorded_base_outranks_the_config_file
+test_brief_cannot_override_the_config_file
 test_direct_pr_and_scout_refresh_before_launch
 test_dirty_pool_refuses_without_discarding_work
 test_unresolved_remote_default_refuses_pool

@@ -201,17 +201,15 @@
 #   not marked.
 #   Only after this isolation check, every fresh ship or scout requires a clean
 #   task worktree. When an origin configuration is detected, spawn fetches it,
-#   resolves the base branch, and resets to its tip. The base is the first of:
-#   a "Launch base: <branch>" line recorded in the task's brief, this home's
-#   config/project-base-<project-name> file when it holds a branch name, or
+#   resolves the base branch, and resets to its tip. The base is this home's
+#   config/project-base-<project-name> when it holds a branch name, otherwise
 #   origin's current default branch. A recorded base is what keeps every task in
 #   a repository whose integration branch is not its default branch (default
 #   main, integration dev) based on the integration branch instead of the
 #   default one, which is why a task there would otherwise open a pull request
-#   that conflicts with the integration branch. The base is resolved the way
-#   `treehouse --base` resolves one: the fetched remote-tracking ref
-#   origin/<branch> when the remote has that branch, otherwise the local branch,
-#   and a base that resolves to neither refuses the spawn. When no origin
+#   that conflicts with the integration branch. A recorded base resolves only
+#   to its freshly fetched origin/<branch>; a missing remote branch refuses the
+#   spawn even when a same-named local branch exists. When no origin
 #   configuration is detected, spawn skips that remote freshness check and
 #   launches from the clean worktree's current HEAD without consulting a
 #   recorded base, because an origin-less pool has no remote to base a pull
@@ -2608,22 +2606,13 @@ spawn_worktree_has_origin_config() {  # <worktree>
 }
 
 # The branch every fresh ship or scout is reset to, resolved in this order:
-#   1. an explicit "Launch base: <branch>" line recorded in the task's brief;
-#   2. config/project-base-<project-name> in this home, when it holds a branch;
-#   3. origin's current default branch.
-# Legs 1 and 2 carry a project whose integration branch differs from its default
-# branch, so a task there starts from the integration branch rather than the
-# default one. Leg 1 is read first because the brief records the base the worker
-# was told it would launch from, and bin/fm-brief.sh states it there exactly as
-# this resolution computes it (bin/fm-project-base-lib.sh owns the file's parse
-# and its refusal, so both scripts read one contract). Echoes the branch NAME;
-# the caller resolves that name to a ref and refuses when it resolves to neither.
-spawn_base_branch_name() {  # <worktree> <project-name> <brief-base>
-  local worktree=$1 project=$2 brief_base=$3 file value default
-  if [ -n "$brief_base" ]; then
-    printf '%s\n' "$brief_base"
-    return 0
-  fi
+#   1. config/project-base-<project-name> in this home, when it holds a branch;
+#   2. origin's current default branch.
+# The recorded branch carries a project whose integration branch differs from
+# its default branch. bin/fm-project-base-lib.sh owns the file's parse and
+# refusal. Echoes the branch name; the caller requires its fetched origin ref.
+spawn_base_branch_name() {  # <worktree> <project-name>
+  local worktree=$1 project=$2 file value default
   if [ -n "$project" ]; then
     file="$CONFIG/project-base-$project"
     value=$(fm_project_base_read "$file") || return 1
@@ -2643,18 +2632,8 @@ spawn_base_branch_name() {  # <worktree> <project-name> <brief-base>
   printf '%s\n' "$default"
 }
 
-# The base recorded in the task's brief, empty when it records none. The line is
-# the brief's own statement of what the worker is about to be launched from, so
-# it outranks this home's config file: a brief that names its base is a decision
-# already made and stated, not a default to re-derive.
-spawn_brief_base() {  # <brief>
-  local brief=$1
-  [ -n "$brief" ] && [ -f "$brief" ] || return 0
-  sed -n 's/^Launch base: \([^[:space:]]*\).*$/\1/p' "$brief" | head -n 1
-}
-
-freshen_spawn_worktree_base() {  # <worktree> <project-name> <brief-base>
-  local worktree=$1 project=$2 brief_base=$3 base target expected actual status
+freshen_spawn_worktree_base() {  # <worktree> <project-name>
+  local worktree=$1 project=$2 base target expected actual status
   SPAWN_BASE_BRANCH=
   status=$(git -C "$worktree" -c core.quotePath=false status --porcelain) || {
     echo "error: could not inspect pooled worktree '$worktree' before refreshing its base" >&2
@@ -2675,17 +2654,15 @@ freshen_spawn_worktree_base() {  # <worktree> <project-name> <brief-base>
     echo "error: could not fetch origin for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
     return 1
   fi
-  base=$(spawn_base_branch_name "$worktree" "$project" "$brief_base") || return 1
+  base=$(spawn_base_branch_name "$worktree" "$project") || return 1
   if git -C "$worktree" show-ref --verify --quiet "refs/remotes/origin/$base"; then
     target="origin/$base"
     if ! git -C "$worktree" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base"; then
       echo "error: could not fetch '$target' for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
       return 1
     fi
-  elif git -C "$worktree" show-ref --verify --quiet "refs/heads/$base"; then
-    target="$base"
   else
-    echo "error: base branch '$base' does not resolve for pooled worktree '$worktree': it has no local branch '$base' and no remote-tracking branch 'origin/$base'; refusing to launch from a missing base" >&2
+    echo "error: base branch '$base' does not exist on remote origin for pooled worktree '$worktree'; refusing to launch from a missing remote base" >&2
     return 1
   fi
   expected=$(git -C "$worktree" rev-parse --verify --quiet "$target^{commit}" 2>/dev/null) || {
@@ -3432,7 +3409,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
-  freshen_spawn_worktree_base "$WT" "$PROJ_NAME" "$(spawn_brief_base "$BRIEF")" || exit 1
+  freshen_spawn_worktree_base "$WT" "$PROJ_NAME" || exit 1
 fi
 
 # Pre-register Claude's workspace trust for the directory this launch starts in,

@@ -49,14 +49,11 @@
 # "Delivery contract: mode=<mode>" line. bin/fm-spawn.sh reads that line and refuses
 # to launch a ship task whose explicit --mode disagrees, so an adjusted brief and the
 # recorded task metadata cannot drift apart.
-# A ship or scout brief also states the base it will be launched from, and records
-# it as a fixed machine-readable "Launch base: <branch>" line when this home
-# records one for that project in config/project-base-<repo-name>. bin/fm-spawn.sh
-# reads that line first when it cuts the worktree, then that same config file, then
-# origin's default branch (bin/fm-project-base-lib.sh owns the file's parse and
-# refusal; docs/configuration.md owns the documented resolution order). A brief
-# that records no base is launched from origin's default branch, which is why the
-# Setup section states that instead.
+# A ship or scout brief states the base it will be launched from when this home
+# records one in config/project-base-<repo-name>. bin/fm-spawn.sh resolves that
+# project file first, then origin's default branch. bin/fm-project-base-lib.sh
+# owns the file's parse and refusal, and docs/configuration.md owns the documented
+# resolution order. The Setup section states the default when no base is recorded.
 # Ship briefs begin with a worktree-isolation assertion before the branch step.
 # --mode is refused on scout and secondmate scaffolds: a scout's deliverable is a
 # report rather than a merge, and a charter is not a delivery contract.
@@ -328,13 +325,11 @@ REPO=${POS[1]}
 # branch". bin/fm-project-base-lib.sh owns the config file's parse and its
 # refusal; an absent or blank file means this project records no base, and the
 # statement then falls back to the default branch bin/fm-spawn.sh will use. The
-# recorded line is also what bin/fm-spawn.sh reads first when it cuts the
-# worktree, which is why a project whose integration branch is not its default
-# branch stops producing pull requests based on the default branch.
+# project file is also what bin/fm-spawn.sh reads when it cuts the worktree,
+# which keeps projects with a separate integration branch off the default base.
 BASE_BRANCH=$(fm_project_base_read "$FM_HOME/config/project-base-$REPO") || exit 1
 if [ -n "$BASE_BRANCH" ]; then
-  SETUP_BLOCK="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean \`$BASE_BRANCH\` tip - the integration branch this project records as its task base, not its default branch.
-Launch base: $BASE_BRANCH"
+  SETUP_BLOCK="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean \`$BASE_BRANCH\` tip - the integration branch this project records as its task base, not its default branch."
 else
   SETUP_BLOCK="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch tip."
 fi
