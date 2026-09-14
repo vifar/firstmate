@@ -2031,6 +2031,33 @@ EOF
   pass "Orca teardown retires terminal-keyed watcher records"
 }
 
+test_teardown_refuses_colliding_watcher_record_key() {
+  local case_dir key marker rc
+  case_dir=$(make_case watcher-record-key-collision)
+  write_meta "$case_dir" local-only ship
+  fm_write_meta "$case_dir/state/other_task.meta" \
+    "window=fm-other_task" "endpoint_task_id=other_task" \
+    "terminal=firstmate_fm-task-x1" "worktree=$case_dir/other-wt" \
+    "project=$case_dir/other-project" "kind=ship" "mode=local-only" \
+    "backend=orca" "orca_worktree_id=other-worktree"
+  key=firstmate_fm-task-x1
+  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+    : > "$case_dir/state/.$marker-$key"
+  done
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "colliding watcher keys must refuse teardown"
+  assert_present "$case_dir/state/task-x1.meta" "collision refusal removed the teardown task"
+  assert_present "$case_dir/state/other_task.meta" "collision refusal removed the colliding task"
+  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+    assert_present "$case_dir/state/.$marker-$key" \
+      "collision refusal removed shared .$marker watcher state"
+  done
+  pass "teardown preserves watcher records when live targets collide"
+}
+
 test_teardown_coordinates_with_watcher_capture() (
   local case_dir pid rc i key
   case_dir=$(make_case watcher-capture-race)
@@ -3794,6 +3821,7 @@ EOF
 if [ "${1:-}" = --watcher-records ]; then
   test_teardown_retires_only_task_watcher_records
   test_orca_teardown_retires_terminal_watcher_records
+  test_teardown_refuses_colliding_watcher_record_key
   test_teardown_watcher_record_cleanup_is_idempotent_when_absent
   test_teardown_coordinates_with_watcher_capture
   exit 0
@@ -3812,6 +3840,7 @@ test_secondmate_home_teardown_delivers_final_line_or_refuses
 test_teardown_missing_busy_sidecar_completes
 test_teardown_retires_only_task_watcher_records
 test_orca_teardown_retires_terminal_watcher_records
+test_teardown_refuses_colliding_watcher_record_key
 test_teardown_watcher_record_cleanup_is_idempotent_when_absent
 test_teardown_coordinates_with_watcher_capture
 test_herdr_teardown_clears_escalation_marker

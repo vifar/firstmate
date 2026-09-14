@@ -839,6 +839,7 @@ remote_secondmate_teardown() {
   route_home=$SECONDMATE_REGISTRY_HOME
   [ "$route_host" = "$remote_host" ] && [ "$route_root" = "$remote_root" ] && [ "$route_home" = "$remote_home" ] \
     || { echo "REFUSED: remote secondmate metadata does not match its registry route" >&2; return 1; }
+  fm_watch_window_records_unique "$STATE" "$(fm_backend_target_of_meta "$META")" "$ID" || return 1
   handoff_wake_retire_validate || return 1
   remote_recovery_paths_validate initial || return 1
   if [ "$FORCE" != --force ] && [ "$REMOTE_OUTBOX_PRESENT" -eq 1 ]; then
@@ -895,7 +896,7 @@ remote_secondmate_teardown() {
   grep -vE "^- $ID( |$)" "$SECONDMATE_REG" > "$tmp" || true
   mv -f -- "$tmp" "$SECONDMATE_REG"
   status_retire_presentation_task "$STATE" "$ID" || return 1
-  fm_watch_retire_window_records "$STATE" "$(fm_meta_get "$META" window)" || return 1
+  fm_watch_retire_window_records "$STATE" "$(fm_backend_target_of_meta "$META")" "$ID" || return 1
   fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" "$STATE" || return 1
   rm -f -- "$STATE/$ID.turn-ended" "$STATE/$ID.progress"
   printf 'teardown %s complete (remote %s:%s)\n' "$ID" "$remote_host" "$remote_home"
@@ -935,6 +936,7 @@ fi
 # worktree return, registry change, or process termination can run.
 WATCH_WINDOW=$(fm_backend_target_of_meta "$META")
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
+fm_watch_window_records_unique "$STATE" "$WATCH_WINDOW" "$ID" || exit 1
 BACKEND=$FM_BACKEND_VALIDATED_BACKEND
 T=$FM_BACKEND_VALIDATED_TARGET
 WT=$(fm_meta_get "$META" worktree)
@@ -3465,7 +3467,7 @@ if [ "$KIND" = secondmate ]; then
     || { echo "error: receiver wake cleanup failed; preserving the secondmate route for retry" >&2; exit 1; }
   remove_secondmate_registry_entry "$ID"
 fi
-fm_watch_retire_window_records "$STATE" "$WATCH_WINDOW" || exit 1
+fm_watch_retire_window_records "$STATE" "$WATCH_WINDOW" "$ID" || exit 1
 remove_grok_turnend_auth "$STATE" "$ID" || exit 1
 remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
 fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
