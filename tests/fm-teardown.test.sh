@@ -1967,6 +1967,44 @@ test_teardown_missing_busy_sidecar_completes() {
   pass "teardown completes when an exact busy-state sidecar is already absent"
 }
 
+test_teardown_retires_only_task_watcher_records() {
+  local case_dir key other_key marker rc
+  case_dir=$(make_case watcher-record-cleanup)
+  write_meta "$case_dir" local-only ship
+  key=$(printf '%s' 'firstmate:fm-task-x1' | tr ':/.' '___')
+  other_key=$(printf '%s' 'firstmate:fm-other-task' | tr ':/.' '___')
+  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+    : > "$case_dir/state/.$marker-$key"
+    : > "$case_dir/state/.$marker-$other_key"
+  done
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "watcher-record-cleanup: teardown should succeed: $(cat "$case_dir/stderr")"
+  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+    assert_absent "$case_dir/state/.$marker-$key" \
+      "watcher-record-cleanup: teardown left the task's .$marker record"
+    assert_present "$case_dir/state/.$marker-$other_key" \
+      "watcher-record-cleanup: teardown removed another window's .$marker record"
+  done
+  pass "teardown retires only the task's watcher records"
+}
+
+test_teardown_watcher_record_cleanup_is_idempotent_when_absent() {
+  local case_dir rc
+  case_dir=$(make_case watcher-records-absent)
+  write_meta "$case_dir" local-only ship
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "watcher-records-absent: teardown should succeed: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/task-x1.meta" \
+    "watcher-records-absent: teardown remained incomplete"
+  pass "teardown succeeds when watcher records are already absent"
+}
+
 test_herdr_teardown_clears_escalation_marker() {
   local case_dir marker
   case_dir=$(make_case herdr-marker-cleanup)
@@ -2184,6 +2222,7 @@ SH
     missing-adapter|missing-parser|missing-explicit-close-helper)
       mkdir -p "$case_dir/test-root"
       cp -R "$ROOT/bin" "$case_dir/test-root/bin"
+      cp "$ROOT/bin/fm-watch-record-lib.sh" "$case_dir/test-root/bin/fm-watch-record-lib.sh"
       if [ "$mode" = missing-adapter ]; then
         rm -f "$case_dir/test-root/bin/backends/herdr.sh"
       elif [ "$mode" = missing-explicit-close-helper ]; then
@@ -3677,6 +3716,8 @@ test_local_only_force_overrides_unpushed
 test_secondmate_pr_registration_publishes_ready_line
 test_secondmate_home_teardown_delivers_final_line_or_refuses
 test_teardown_missing_busy_sidecar_completes
+test_teardown_retires_only_task_watcher_records
+test_teardown_watcher_record_cleanup_is_idempotent_when_absent
 test_herdr_teardown_clears_escalation_marker
 test_herdr_flat_teardown_refuses_orphaning_records_then_retry_completes
 test_herdr_flat_teardown_refuses_records_on_unparseable_presence
