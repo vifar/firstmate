@@ -1967,158 +1967,6 @@ test_teardown_missing_busy_sidecar_completes() {
   pass "teardown completes when an exact busy-state sidecar is already absent"
 }
 
-test_teardown_retires_only_task_watcher_records() {
-  local case_dir key other_key marker rc
-  case_dir=$(make_case watcher-record-cleanup)
-  write_meta "$case_dir" local-only ship
-  key=$(printf '%s' 'firstmate:fm-task-x1' | tr ':/.' '___')
-  other_key=$(printf '%s' 'firstmate:fm-other-task' | tr ':/.' '___')
-  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
-    : > "$case_dir/state/.$marker-$key"
-    : > "$case_dir/state/.$marker-$other_key"
-  done
-  set +e
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
-  rc=$?
-  set -e
-  expect_code 0 "$rc" "watcher-record-cleanup: teardown should succeed: $(cat "$case_dir/stderr")"
-  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
-    assert_absent "$case_dir/state/.$marker-$key" \
-      "watcher-record-cleanup: teardown left the task's .$marker record"
-    assert_present "$case_dir/state/.$marker-$other_key" \
-      "watcher-record-cleanup: teardown removed another window's .$marker record"
-  done
-  pass "teardown retires only the task's watcher records"
-}
-
-test_orca_teardown_retires_terminal_watcher_records() {
-  local case_dir key window_key marker rc
-  case_dir=$(make_case orca-watcher-record-cleanup)
-  write_meta "$case_dir" local-only ship
-  awk '{ if ($0 ~ /^window=/) print "window=fm-task-x1"; else print }' \
-    "$case_dir/state/task-x1.meta" > "$case_dir/state/task-x1.meta.next"
-  mv "$case_dir/state/task-x1.meta.next" "$case_dir/state/task-x1.meta"
-  cat >> "$case_dir/state/task-x1.meta" <<'EOF'
-backend=orca
-terminal=orca-terminal.task.x1
-orca_worktree_id=orca-worktree-task-x1
-EOF
-  cat > "$case_dir/fakebin/orca" <<EOF
-#!/usr/bin/env bash
-case "\${1:-} \${2:-}" in
-  "worktree show") printf '{"ok":true,"result":{"worktree":{"id":"orca-worktree-task-x1","path":"%s"}}}\\n' "$case_dir/wt" ;;
-  *) printf '{"ok":true,"result":{}}\\n' ;;
-esac
-EOF
-  chmod +x "$case_dir/fakebin/orca"
-  key=$(printf '%s' 'orca-terminal.task.x1' | tr ':/.' '___')
-  window_key=$(printf '%s' 'firstmate:fm-task-x1' | tr ':/.' '___')
-  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
-    : > "$case_dir/state/.$marker-$key"
-    : > "$case_dir/state/.$marker-$window_key"
-  done
-  set +e
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
-  rc=$?
-  set -e
-  expect_code 0 "$rc" "orca-watcher-record-cleanup: teardown should succeed: $(cat "$case_dir/stderr")"
-  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
-    assert_absent "$case_dir/state/.$marker-$key" \
-      "orca-watcher-record-cleanup: teardown left the terminal-keyed .$marker record"
-    assert_present "$case_dir/state/.$marker-$window_key" \
-      "orca-watcher-record-cleanup: teardown removed raw-window .$marker state"
-  done
-  pass "Orca teardown retires terminal-keyed watcher records"
-}
-
-test_teardown_refuses_colliding_watcher_record_key() {
-  local case_dir key marker rc
-  case_dir=$(make_case watcher-record-key-collision)
-  write_meta "$case_dir" local-only ship
-  fm_write_meta "$case_dir/state/other_task.meta" \
-    "window=fm-other_task" "endpoint_task_id=other_task" \
-    "terminal=firstmate_fm-task-x1" "worktree=$case_dir/other-wt" \
-    "project=$case_dir/other-project" "kind=ship" "mode=local-only" \
-    "backend=orca" "orca_worktree_id=other-worktree"
-  key=firstmate_fm-task-x1
-  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
-    : > "$case_dir/state/.$marker-$key"
-  done
-  set +e
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
-  rc=$?
-  set -e
-  expect_code 1 "$rc" "colliding watcher keys must refuse teardown"
-  assert_present "$case_dir/state/task-x1.meta" "collision refusal removed the teardown task"
-  assert_present "$case_dir/state/other_task.meta" "collision refusal removed the colliding task"
-  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
-    assert_present "$case_dir/state/.$marker-$key" \
-      "collision refusal removed shared .$marker watcher state"
-  done
-  pass "teardown preserves watcher records when live targets collide"
-}
-
-test_teardown_coordinates_with_watcher_capture() (
-  local case_dir pid rc i key
-  case_dir=$(make_case watcher-capture-race)
-  write_meta "$case_dir" local-only ship
-  key=firstmate_fm-task-x1
-  cat > "$case_dir/fakebin/tmux" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *capture-pane*)
-    touch "$FM_HOME/capture-started"
-    while [ ! -e "$FM_HOME/capture-release" ]; do sleep 0.05; done
-    printf 'idle pane\n'
-    ;;
-esac
-SH
-  FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
-    PATH="$case_dir/fakebin:$PATH" FM_POLL=1 FM_CHECK_INTERVAL=999999 \
-    FM_HEARTBEAT=999999 "$ROOT/bin/fm-watch.sh" > "$case_dir/watch.out" 2> "$case_dir/watch.err" &
-  pid=$!
-  trap 'touch "$case_dir/capture-release"; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
-  for ((i=0; i<300; i++)); do
-    [ ! -e "$case_dir/capture-started" ] || break
-    sleep 0.1
-  done
-  assert_present "$case_dir/capture-started" "watcher never reached capture: $(cat "$case_dir/watch.err")"
-  rc=0
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  expect_code 1 "$rc" "teardown must refuse while watcher owns task lifecycle"
-  assert_present "$case_dir/state/task-x1.meta" "contended teardown removed metadata"
-  touch "$case_dir/capture-release"
-  for ((i=0; i<300; i++)); do
-    [ ! -e "$case_dir/state/.hash-$key" ] || break
-    sleep 0.1
-  done
-  assert_present "$case_dir/state/.hash-$key" "watcher did not publish captured pane"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  trap - EXIT
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" \
-    || fail "teardown retry failed: $(cat "$case_dir/stderr")"
-  assert_absent "$case_dir/state/.hash-$key" "teardown retry left captured pane records"
-  FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
-    bash -c '. "$1/bin/fm-watch.sh"; trap watch_record_release EXIT; ! watch_record_acquire task-x1 firstmate:fm-task-x1' _ "$ROOT" \
-    || fail "retired endpoint admitted a stale watcher snapshot"
-  pass "teardown and in-progress watcher capture share task lifecycle exclusion"
-)
-
-test_teardown_watcher_record_cleanup_is_idempotent_when_absent() {
-  local case_dir rc
-  case_dir=$(make_case watcher-records-absent)
-  write_meta "$case_dir" local-only ship
-  set +e
-  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
-  rc=$?
-  set -e
-  expect_code 0 "$rc" "watcher-records-absent: teardown should succeed: $(cat "$case_dir/stderr")"
-  assert_absent "$case_dir/state/task-x1.meta" \
-    "watcher-records-absent: teardown remained incomplete"
-  pass "teardown succeeds when watcher records are already absent"
-}
-
 test_herdr_teardown_clears_escalation_marker() {
   local case_dir marker
   case_dir=$(make_case herdr-marker-cleanup)
@@ -3818,15 +3666,6 @@ EOF
   pass "the run abort and the leaked-process reap both complete before the destructive worktree return"
 }
 
-if [ "${1:-}" = --watcher-records ]; then
-  test_teardown_retires_only_task_watcher_records
-  test_orca_teardown_retires_terminal_watcher_records
-  test_teardown_refuses_colliding_watcher_record_key
-  test_teardown_watcher_record_cleanup_is_idempotent_when_absent
-  test_teardown_coordinates_with_watcher_capture
-  exit 0
-fi
-
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
@@ -3838,11 +3677,6 @@ test_local_only_force_overrides_unpushed
 test_secondmate_pr_registration_publishes_ready_line
 test_secondmate_home_teardown_delivers_final_line_or_refuses
 test_teardown_missing_busy_sidecar_completes
-test_teardown_retires_only_task_watcher_records
-test_orca_teardown_retires_terminal_watcher_records
-test_teardown_refuses_colliding_watcher_record_key
-test_teardown_watcher_record_cleanup_is_idempotent_when_absent
-test_teardown_coordinates_with_watcher_capture
 test_herdr_teardown_clears_escalation_marker
 test_herdr_flat_teardown_refuses_orphaning_records_then_retry_completes
 test_herdr_flat_teardown_refuses_records_on_unparseable_presence

@@ -4790,6 +4790,92 @@ test_paused_until_that_passed_is_rechecked_before_the_cadence() {
   pass "a declared wait whose until time has passed is rechecked at once, then held to the cadence"
 }
 
+test_watcher_retires_dead_window_records_and_preserves_live_key() {
+  local dir state fakebin out pid marker i
+  dir=$(make_case watch-record-sweep); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = display-message ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -t ] && [ "${2:-}" = test:fm-live ]; then exit 0; fi
+    shift
+  done
+  exit 1
+fi
+if [ "${1:-}" = capture-pane ]; then printf 'live pane\n'; exit 0; fi
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+    : > "$state/.$marker-test_fm-live"
+    : > "$state/.$marker-test_fm-dead"
+  done
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  for ((i=0; i<300; i++)); do
+    [ -e "$state/.hash-test_fm-dead" ] || break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  reap "$pid"
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
+    assert_absent "$state/.$marker-test_fm-dead" "watcher left dead-window .$marker state"
+    assert_present "$state/.$marker-test_fm-live" "watcher removed live-window .$marker state"
+  done
+  pass "watcher retires dead-window records and preserves live-window records"
+}
+
+test_watcher_record_sweep_is_bounded_and_idempotent() {
+  local dir state fakebin out pid i remaining
+  dir=$(make_case watch-record-sweep-bound); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  for ((i=1; i<=65; i++)); do
+    printf -v remaining '%02d' "$i"
+    : > "$state/.hash-dead-$remaining"
+  done
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  for ((i=0; i<300; i++)); do
+    remaining=$(find "$state" -maxdepth 1 -name '.hash-dead-*' -type f | wc -l | tr -d '[:space:]')
+    [ "$remaining" = 1 ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  reap "$pid"
+  remaining=$(find "$state" -maxdepth 1 -name '.hash-dead-*' -type f | wc -l | tr -d '[:space:]')
+  [ "$remaining" = 1 ] || fail "one watcher poll retired $((65 - remaining)) records instead of the bounded 64"
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  for ((i=0; i<300; i++)); do
+    remaining=$(find "$state" -maxdepth 1 -name '.hash-dead-*' -type f | wc -l | tr -d '[:space:]')
+    [ "$remaining" = 0 ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  reap "$pid"
+  [ "$remaining" = 0 ] || fail "the next watcher poll did not retire the remaining dead-window record"
+  rm -f "$state/.last-watcher-beat"
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_POLL=30 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  for ((i=0; i<300; i++)); do
+    [ -e "$state/.last-watcher-beat" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$pid" 2>/dev/null || fail "an empty watcher-record sweep stopped the watcher"
+  reap "$pid"
+  pass "watcher record retirement is bounded, resumable, and idempotent"
+}
+
+if [ "${1:-}" = --watch-record-sweep ]; then
+  test_watcher_retires_dead_window_records_and_preserves_live_key
+  test_watcher_record_sweep_is_bounded_and_idempotent
+  exit 0
+fi
 
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
