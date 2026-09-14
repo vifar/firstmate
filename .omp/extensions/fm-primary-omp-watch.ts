@@ -585,6 +585,7 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement. Watcher continuity is extension-owned.`,
     );
+    if (pending && !handoffWorkIsLive(pending)) return true;
     if (pending) owner.unconsumedWakes.set(pending.token, { content, pending });
     try {
       await pi.sendUserMessage(content, { deliverAs: "followUp" });

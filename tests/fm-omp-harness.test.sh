@@ -705,6 +705,37 @@ if (sent.length !== referencedBefore + 1 || !sent.at(-1).m.includes("live-first.
 }
 if (!existsSync(handoffPath) || readHandoff().length !== 1) throw new Error("only the delivered live referenced record may remain pending consumption");
 await handlers.get("session_shutdown")({}, {});
+writeFileSync(`${process.env.FM_ROOT_OVERRIDE}/bin/fm-watch-arm.sh`, `#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+touch "$FM_HOME/state/arm-waiting"
+while [ ! -e "$FM_HOME/state/arm-release" ]; do sleep 0.02; done
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\\n' "$$"
+sleep 30
+`);
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+const restoringPath = `${home}/state/finishes-during-restoration.status`;
+writeFileSync(restoringPath, "busy\n");
+writeFileSync(`${home}/state/finishes-during-restoration.meta`, "runtime\n");
+const restoring = record(0, 700);
+restoring.message = `signal: ${restoringPath}`;
+writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: [restoring] })}\n`);
+const beforeRestoration = sent.length;
+await handlers.get("session_start")({ type: "session_start" }, {});
+await waitUntil(() => existsSync(`${home}/state/arm-waiting`), "blocked arm readiness");
+if (readHandoff().length !== 1 || sent.length !== beforeRestoration) throw new Error("live handoff must remain pending while readiness is blocked");
+unlinkSync(restoringPath);
+writeFileSync(`${home}/state/arm-release`, "ready\n");
+await waitUntil(() => !existsSync(handoffPath) || sent.length > beforeRestoration, "restoration settlement");
+if (sent.length !== beforeRestoration) throw new Error("work finished during restoration was replayed at the send boundary");
+if (existsSync(handoffPath)) throw new Error("finished work must leave the replacement handoff store");
+await handlers.get("session_shutdown")({}, {});
+if (existsSync(handoffPath)) throw new Error("shutdown resurrected work dropped at the send boundary");
 process.exit(0);
 EOF
 )
