@@ -33,9 +33,9 @@
 // Replacement handoff lifetime (stated once here):
 // The handoff exists to carry a close across ONE session replacement, so a
 // stored record is eligible only while it can still be the pending close it was
-// written for: created within FM_OMP_HANDOFF_TTL_MS (10 minutes) and among the
-// newest FM_OMP_HANDOFF_MAX_PENDING (32) records. Every load, merge, and
-// persist path applies both bounds, so the store cannot grow without bound and
+// written for: created within 10 minutes, among the newest 32 records, and
+// still naming live runtime state when it carries state references. Every
+// load, merge, and persist path applies these bounds, so the store cannot grow without bound and
 // a session_start can never replay a long tail of closes for work that has
 // already finished - each record is a fresh snapshot of the actionable state,
 // a newer close supersedes an older one, the durable wake queue already keeps
@@ -56,7 +56,7 @@
 // replacement handoff.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // typebox resolves inside omp's extension loader (verified, omp 18.1.11); the
@@ -146,8 +146,8 @@ const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
 const retryLimit = positiveInteger("FM_WATCH_REARM_RETRY_LIMIT", 5);
 // Replacement-handoff bounds (contract: "Replacement handoff lifetime" above).
-const handoffTtlMs = positiveInteger("FM_OMP_HANDOFF_TTL_MS", 600_000);
-const handoffMaxPending = positiveInteger("FM_OMP_HANDOFF_MAX_PENDING", 32);
+const handoffTtlMs = 600_000;
+const handoffMaxPending = 32;
 // 35s on Windows so the budget stays above arm's MSYS confirm default (30s in
 // bin/fm-watch-arm.sh): a slow but successful Git Bash cold start must not be
 // SIGTERMed mid-confirmation. Conditioned on win32 so other platforms keep 12s.
@@ -321,6 +321,24 @@ function validatePendingActionable(value: unknown): PendingActionableClose {
   return value as PendingActionableClose;
 }
 
+function handoffWorkIsLive(pending: PendingActionableClose): boolean {
+  const line = actionableLine(pending.message);
+  const references: string[] = [];
+  if (line.startsWith("signal:")) {
+    references.push(...line.slice("signal:".length).trim().split(/\s+/).filter((path) => path.startsWith(`${state}/`)));
+  } else {
+    const check = /^check:\s+(.+?\.check\.sh):(?:\s|$)/.exec(line)?.[1];
+    if (check?.startsWith(`${state}/`)) references.push(check);
+  }
+  if (references.length === 0) return true;
+  for (const path of references) {
+    if (!existsSync(path)) return false;
+    const suffix = path.endsWith(".turn-ended") ? ".turn-ended" : path.endsWith(".status") ? ".status" : "";
+    if (suffix && !existsSync(`${path.slice(0, -suffix.length)}.meta`)) return false;
+  }
+  return true;
+}
+
 // Keeps only records that can still be the pending close they were written for,
 // oldest first (the order a replacement replays them in). The token's middle
 // field is the creating process's epoch milliseconds, so a record carries its
@@ -328,7 +346,7 @@ function validatePendingActionable(value: unknown): PendingActionableClose {
 function eligibleHandoff(pending: PendingActionableClose[]): PendingActionableClose[] {
   const now = Date.now();
   return pending
-    .filter((item) => now - Number(item.token.split("-")[1]) <= handoffTtlMs)
+    .filter((item) => now - Number(item.token.split("-")[1]) <= handoffTtlMs && handoffWorkIsLive(item))
     .sort((a, b) => Number(a.token.split("-")[1]) - Number(b.token.split("-")[1]))
     .slice(-handoffMaxPending);
 }
@@ -739,6 +757,10 @@ export default function (pi: ExtensionAPI) {
           (item) => !item.delivered && !owner.unconsumedWakes.has(item.token),
         );
         if (!pending) break;
+        if (!handoffWorkIsLive(pending)) {
+          finishPendingActionable(owner, pending);
+          continue;
+        }
         const existingClaim = replacementCoordinator.deliveries.get(pending.token);
         if (existingClaim && existingClaim.owner !== owner) {
           const settlement = await existingClaim.settlement;

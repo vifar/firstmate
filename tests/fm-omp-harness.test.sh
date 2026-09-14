@@ -618,7 +618,7 @@ SH
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
     EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 const home = process.env.FM_HOME;
 const handoffPath = `${home}/state/extensions/omp-primary-watch/session-replacement-actionable.json`;
 const readHandoff = () => JSON.parse(readFileSync(handoffPath, "utf8")).pending;
@@ -637,12 +637,20 @@ const record = (ageMs, seq) => ({
 const seeded = [record(3600000, 1), record(1800000, 2)];
 for (let i = 0; i < 40; i += 1) seeded.push(record(0, 100 + i));
 writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: seeded })}\n`);
+let removeBeforeDelivery = "";
 const handlers = new Map(); const sent = [];
 const pi = {
   on(e, h) { handlers.set(e, h); },
   registerCommand() {},
   registerTool() {},
-  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+  sendUserMessage(m, o) {
+    sent.push({ m, o });
+    if (removeBeforeDelivery) {
+      unlinkSync(removeBeforeDelivery);
+      removeBeforeDelivery = "";
+    }
+    return undefined;
+  },
 };
 const mod = await import(pathToFileURL(process.env.EXT).href);
 mod.default(pi);
@@ -673,6 +681,29 @@ await handlers.get("session_start")({ type: "session_start" }, {});
 await new Promise((resolve) => setTimeout(resolve, 500));
 if (sent.length !== deliveredBefore) throw new Error(`a stale-only store replayed ${sent.length - deliveredBefore} wakes into the replacement session`);
 if (existsSync(handoffPath)) throw new Error("a stale-only store must be cleared at session start");
+await handlers.get("session_shutdown")({}, {});
+// Admission rejects missing runtime metadata and missing check scripts. The
+// second live record then loses its state file after admission but before its
+// delivery turn, proving delivery revalidates the same eligibility rule.
+for (const id of ["live-first", "stale-during-delivery"]) {
+  writeFileSync(`${home}/state/${id}.status`, "busy\n");
+  writeFileSync(`${home}/state/${id}.meta`, "runtime\n");
+}
+writeFileSync(`${home}/state/no-runtime.status`, "done\n");
+const referenced = [record(0, 600), record(0, 601), record(0, 602), record(0, 603)];
+referenced[0].message = `signal: ${home}/state/live-first.status`;
+referenced[1].message = `signal: ${home}/state/stale-during-delivery.status`;
+referenced[2].message = `signal: ${home}/state/no-runtime.status`;
+referenced[3].message = `check: ${home}/state/missing.check.sh: complete`;
+writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: referenced })}\n`);
+removeBeforeDelivery = `${home}/state/stale-during-delivery.status`;
+const referencedBefore = sent.length;
+await handlers.get("session_start")({ type: "session_start" }, {});
+await new Promise((resolve) => setTimeout(resolve, 750));
+if (sent.length !== referencedBefore + 1 || !sent.at(-1).m.includes("live-first.status")) {
+  throw new Error(`replacement replayed finished referenced work: ${sent.slice(referencedBefore).map((wake) => wake.m).join(" | ")}`);
+}
+if (!existsSync(handoffPath) || readHandoff().length !== 1) throw new Error("only the delivered live referenced record may remain pending consumption");
 await handlers.get("session_shutdown")({}, {});
 process.exit(0);
 EOF
