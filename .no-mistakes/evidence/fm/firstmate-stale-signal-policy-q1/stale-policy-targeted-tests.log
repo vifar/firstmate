@@ -1,0 +1,5 @@
+ok - stale classification reconciles current worker state before status-log handling
+ok - missing-status stale wakes surface an unidentified-pane recovery decision
+ok - metadata-free stale panes surface recovery regardless of status history
+ok - paused reasons with captain phrases remain pause-classified
+ok - a captain-held transfer classifies as pause, not as a wedge candidate

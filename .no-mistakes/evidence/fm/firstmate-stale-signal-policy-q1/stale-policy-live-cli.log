@@ -1,0 +1,8 @@
+CURRENT ACTIVE: state: working · source: pane · harness busy (fm-spawn)
+ACTIVE ESCALATION BUFFER: <empty>
+CURRENT MISSING: state: unknown · source: pane · harness state unavailable (unknown missing)
+MISSING RECOVERY: stale + current worker state is unresolved for missing; recovery decision: inspect the recorded endpoint and worktree before relaunching
+CURRENT STALE-PAUSE: state: unknown · source: pane · harness state unavailable (unknown missing)
+STALE-PAUSE RECOVERY: stale + current worker state is unresolved for paused; recovery decision: inspect the recorded endpoint and worktree before relaunching
+UNRECORDED RECOVERY: stale pane is not associated with a recorded worker; recovery decision: inspect the unidentified pane before relaunching
+DECISIONS WERE PRODUCED THROUGH: handle_wake (the daemon wake consumer)
