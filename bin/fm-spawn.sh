@@ -2655,13 +2655,8 @@ freshen_spawn_worktree_base() {  # <worktree> <project-name>
     return 1
   fi
   base=$(spawn_base_branch_name "$worktree" "$project") || return 1
-  if git -C "$worktree" show-ref --verify --quiet "refs/remotes/origin/$base"; then
-    target="origin/$base"
-    if ! git -C "$worktree" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base"; then
-      echo "error: could not fetch '$target' for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
-      return 1
-    fi
-  else
+  target="origin/$base"
+  if ! git -C "$worktree" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base"; then
     echo "error: base branch '$base' does not exist on remote origin for pooled worktree '$worktree'; refusing to launch from a missing remote base" >&2
     return 1
   fi

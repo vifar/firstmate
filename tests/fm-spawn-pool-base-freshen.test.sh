@@ -820,8 +820,12 @@ test_recorded_integration_base_refreshes_before_branching() {
   rec=$(make_integration_base_case integration-base "$id")
   read_integration_case "$rec"
   printf '%s\n' "$INTEGRATION_BRANCH" > "$HOME_DIR/config/project-base-controller"
+  git -C "$PROJECT_DIR" config --replace-all remote.origin.fetch '+refs/heads/main:refs/remotes/origin/main'
+  git -C "$PROJECT_DIR" update-ref -d "refs/remotes/origin/$INTEGRATION_BRANCH"
   [ "$(git -C "$PROJECT_DIR" rev-parse "refs/heads/$INTEGRATION_BRANCH")" = "$INITIAL_SHA" ] \
     || fail "fixture did not leave a local branch of the recorded name behind origin"
+  git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/remotes/origin/$INTEGRATION_BRANCH" \
+    && fail "fixture already tracks the integration branch despite its restricted fetch refspec"
 
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)
   status=$?
