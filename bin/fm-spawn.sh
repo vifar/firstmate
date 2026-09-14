@@ -201,12 +201,24 @@
 #   not marked.
 #   Only after this isolation check, every fresh ship or scout requires a clean
 #   task worktree. When an origin configuration is detected, spawn fetches it,
-#   resolves the current remote default branch, and resets to its tip. When none
-#   is detected, spawn skips that remote freshness check and launches from the
-#   clean worktree's current HEAD. Relaunch reuses the recorded worktree without
-#   fetching or resetting its base. An unreachable detected origin, unresolved
-#   default branch, or non-clean worktree refuses a fresh spawn rather than
-#   risking a PR based on stale history or discarding local work.
+#   resolves the base branch, and resets to its tip. The base is the first of:
+#   a "Launch base: <branch>" line recorded in the task's brief, this home's
+#   config/project-base-<project-name> file when it holds a branch name, or
+#   origin's current default branch. A recorded base is what keeps every task in
+#   a repository whose integration branch is not its default branch (default
+#   main, integration dev) based on the integration branch instead of the
+#   default one, which is why a task there would otherwise open a pull request
+#   that conflicts with the integration branch. The base is resolved the way
+#   `treehouse --base` resolves one: the fetched remote-tracking ref
+#   origin/<branch> when the remote has that branch, otherwise the local branch,
+#   and a base that resolves to neither refuses the spawn. When no origin
+#   configuration is detected, spawn skips that remote freshness check and
+#   launches from the clean worktree's current HEAD without consulting a
+#   recorded base, because an origin-less pool has no remote to base a pull
+#   request on. Relaunch reuses the recorded worktree without fetching or
+#   resetting its base. An unreachable detected origin, unresolved default
+#   branch, unresolvable recorded base, or non-clean worktree refuses a fresh
+#   spawn rather than risking a PR based on stale history or discarding local work.
 #   A slot whose only deviation is a stale submodule gitlink is refused by that
 #   same clean check, but is reported as a stale checkout naming each submodule
 #   and both pins; nothing is converged or removed, and no remedy is suggested.
@@ -341,7 +353,10 @@
 # keeps no data/backlog.md. A configured non-markdown adapter remains
 # active without a markdown file; any active automatic backend without
 # compatible tasks-axi refuses before creating lifecycle state.
-# On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
+# On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path> [base=<branch>]
+# base= names the branch a fresh ship or scout worktree was reset to, and is
+# absent for a spawn that resolved no base (a secondmate, a relaunch, or an
+# origin-less pool).
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
 # success line and state/<id>.meta omit them.
@@ -412,6 +427,8 @@ PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
+# shellcheck source=bin/fm-project-base-lib.sh
+. "$SCRIPT_DIR/fm-project-base-lib.sh"
 if ! LAUNCH_ENV_ENABLED=$(fm_config_source_present "$CONFIG/launch-env-allowlist"); then
   exit 1
 fi
@@ -932,6 +949,7 @@ SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
 SPAWN_SLOT_CLAIMED=0
+SPAWN_BASE_BRANCH=
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
 RELAUNCH_REPLACEMENT_HARNESS=
@@ -2336,6 +2354,10 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+# The project's own name, which is what a recorded base and the standing
+# delivery posture are keyed by. Derived for every kind because the base
+# resolution below needs it for scouts too, not only for ship spawns.
+PROJ_NAME=$(basename "$PROJ_ABS")
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
     echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
@@ -2403,7 +2425,6 @@ delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task
 # line. A spawn that disagrees would launch a worker whose instructions and whose
 # recorded task delivery differ, which is the exact drift this contract prevents.
 if [ "$KIND" = ship ]; then
-  PROJ_NAME=$(basename "$PROJ_ABS")
   BRIEF_MODE=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$BRIEF" | head -n 1)
   if [ -z "$BRIEF_MODE" ]; then
     echo "warning: $BRIEF records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode $MODE - confirm its definition of done matches" >&2
@@ -2586,8 +2607,55 @@ spawn_worktree_has_origin_config() {  # <worktree>
   return 1
 }
 
-freshen_spawn_worktree_base() {  # <worktree>
-  local worktree=$1 default target expected actual status
+# The branch every fresh ship or scout is reset to, resolved in this order:
+#   1. an explicit "Launch base: <branch>" line recorded in the task's brief;
+#   2. config/project-base-<project-name> in this home, when it holds a branch;
+#   3. origin's current default branch.
+# Legs 1 and 2 carry a project whose integration branch differs from its default
+# branch, so a task there starts from the integration branch rather than the
+# default one. Leg 1 is read first because the brief records the base the worker
+# was told it would launch from, and bin/fm-brief.sh states it there exactly as
+# this resolution computes it (bin/fm-project-base-lib.sh owns the file's parse
+# and its refusal, so both scripts read one contract). Echoes the branch NAME;
+# the caller resolves that name to a ref and refuses when it resolves to neither.
+spawn_base_branch_name() {  # <worktree> <project-name> <brief-base>
+  local worktree=$1 project=$2 brief_base=$3 file value default
+  if [ -n "$brief_base" ]; then
+    printf '%s\n' "$brief_base"
+    return 0
+  fi
+  if [ -n "$project" ]; then
+    file="$CONFIG/project-base-$project"
+    value=$(fm_project_base_read "$file") || return 1
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+  if ! git -C "$worktree" remote set-head origin --auto >/dev/null 2>&1; then
+    echo "error: could not resolve origin's current default branch for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+    return 1
+  fi
+  default=$(default_branch "$worktree") || {
+    echo "error: could not determine origin's default branch for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+    return 1
+  }
+  printf '%s\n' "$default"
+}
+
+# The base recorded in the task's brief, empty when it records none. The line is
+# the brief's own statement of what the worker is about to be launched from, so
+# it outranks this home's config file: a brief that names its base is a decision
+# already made and stated, not a default to re-derive.
+spawn_brief_base() {  # <brief>
+  local brief=$1
+  [ -n "$brief" ] && [ -f "$brief" ] || return 0
+  sed -n 's/^Launch base: \([^[:space:]]*\).*$/\1/p' "$brief" | head -n 1
+}
+
+freshen_spawn_worktree_base() {  # <worktree> <project-name> <brief-base>
+  local worktree=$1 project=$2 brief_base=$3 base target expected actual status
+  SPAWN_BASE_BRANCH=
   status=$(git -C "$worktree" -c core.quotePath=false status --porcelain) || {
     echo "error: could not inspect pooled worktree '$worktree' before refreshing its base" >&2
     return 1
@@ -2607,17 +2675,17 @@ freshen_spawn_worktree_base() {  # <worktree>
     echo "error: could not fetch origin for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
     return 1
   fi
-  if ! git -C "$worktree" remote set-head origin --auto >/dev/null 2>&1; then
-    echo "error: could not resolve origin's current default branch for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
-    return 1
-  fi
-  default=$(default_branch "$worktree") || {
-    echo "error: could not determine origin's default branch for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
-    return 1
-  }
-  target="origin/$default"
-  if ! git -C "$worktree" fetch --quiet origin "+refs/heads/$default:refs/remotes/origin/$default"; then
-    echo "error: could not fetch '$target' for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+  base=$(spawn_base_branch_name "$worktree" "$project" "$brief_base") || return 1
+  if git -C "$worktree" show-ref --verify --quiet "refs/remotes/origin/$base"; then
+    target="origin/$base"
+    if ! git -C "$worktree" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base"; then
+      echo "error: could not fetch '$target' for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+      return 1
+    fi
+  elif git -C "$worktree" show-ref --verify --quiet "refs/heads/$base"; then
+    target="$base"
+  else
+    echo "error: base branch '$base' does not resolve for pooled worktree '$worktree': it has no local branch '$base' and no remote-tracking branch 'origin/$base'; refusing to launch from a missing base" >&2
     return 1
   fi
   expected=$(git -C "$worktree" rev-parse --verify --quiet "$target^{commit}" 2>/dev/null) || {
@@ -2633,6 +2701,7 @@ freshen_spawn_worktree_base() {  # <worktree>
     echo "error: pooled worktree '$worktree' is at '${actual:-unknown}', not current '$target' ('$expected'); refusing to launch" >&2
     return 1
   fi
+  SPAWN_BASE_BRANCH=$base
 }
 
 herdr_projection_meta_field_exact() {  # <meta> <key>
@@ -3363,7 +3432,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
-  freshen_spawn_worktree_base "$WT" || exit 1
+  freshen_spawn_worktree_base "$WT" "$PROJ_NAME" "$(spawn_brief_base "$BRIEF")" || exit 1
 fi
 
 # Pre-register Claude's workspace trust for the directory this launch starts in,
@@ -4324,4 +4393,4 @@ SPAWN_META_LOCK_HELD=0
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"
-echo "spawned $ID harness=$HARNESS kind=$KIND$SPAWN_DELIVERY window=$META_WINDOW worktree=$WT"
+echo "spawned $ID harness=$HARNESS kind=$KIND$SPAWN_DELIVERY window=$META_WINDOW worktree=$WT${SPAWN_BASE_BRANCH:+ base=$SPAWN_BASE_BRANCH}"
