@@ -11,10 +11,9 @@
 # config/project-base-<project-name> holds exactly one token, the branch name,
 # where <project-name> is the project directory's own basename - the same value
 # bin/fm-spawn.sh derives and bin/fm-brief.sh receives as its repo argument.
-# bin/fm-brief.sh states it in the scaffolded brief as a "Launch base: <branch>"
-# line, and bin/fm-spawn.sh reads that line first, then this file, then origin's
-# default branch (AGENTS.md section 2 and docs/configuration.md own the layout
-# entry and the documented resolution order).
+# bin/fm-brief.sh describes the intended base in its Setup statement; the brief
+# never sets the base. See docs/configuration.md "Task launch base" for spawn's
+# resolution order and .agents/skills/project-management/SKILL.md for intake.
 #
 # Usage: . bin/fm-project-base-lib.sh
 #

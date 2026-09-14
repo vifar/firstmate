@@ -417,7 +417,7 @@ The file holds exactly one token, the branch name, on one trimmed line; a traili
 An absent file, or a file that is blank after trimming, means the project records no base and the launch falls through to origin's default branch.
 A file that holds embedded whitespace or a second nonblank line is malformed and refuses the launch with the file named, and so does a file that is not a readable regular file, rather than being silently truncated into some real branch name.
 
-Project add, clone, create, and initialize intake records this file when the repository's known integration branch differs from its default branch.
+The recording step for project intake is owned by [project-management](../.agents/skills/project-management/SKILL.md#preconditions-and-registry).
 The resolution order is owned by `bin/fm-spawn.sh` and is, in order:
 
 1. `config/project-base-<project-name>`, when that file exists and holds a branch name;
@@ -426,7 +426,8 @@ The resolution order is owned by `bin/fm-spawn.sh` and is, in order:
 Spawn fetches origin and resets a recorded base only to the freshly fetched remote-tracking ref `origin/<branch>`.
 A recorded base that has no remote branch refuses the launch, even when a same-named local branch exists.
 An origin-less pool is unchanged: it has no remote to base a pull request on, so it launches from its own clean HEAD without consulting a recorded base.
-The resolved base is printed on the launch line as `base=<branch>` and appears in the brief's Setup statement, so the operator and the worker both see which branch the task started from.
+The resolved base is printed on the launch line as `base=<branch>` when spawn resets the worktree.
+The brief's Setup statement describes the intended base from the configuration at scaffold time; spawn does not read a base from the brief.
 Relaunch reuses the recorded worktree and never re-resolves the base.
 The file is local to each home and is not inherited by secondmate homes, because each home has its own project clones and its own integration-branch choices; a secondmate home that needs one records it there.
 `bin/fm-project-base-lib.sh` is the single owner of the file's parse and its refusal, so `bin/fm-brief.sh` and `bin/fm-spawn.sh` read one contract.
