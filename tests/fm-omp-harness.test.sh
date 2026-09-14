@@ -601,6 +601,88 @@ EOF
   pass ".omp watch extension: fm_watch_arm_omp arms once, repeats as a no-op, and delivers an actionable close as one follow-up"
 }
 
+test_watch_extension_bounds_replacement_handoff() {
+  local repo home out status
+  repo="$TMP_ROOT/handoff/repo"; home="$TMP_ROOT/handoff/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The arm child starts, confirms a handling delivery, and stays up: the only
+  # wakes this case produces are the records already in the handoff store.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const home = process.env.FM_HOME;
+const handoffPath = `${home}/state/extensions/omp-primary-watch/session-replacement-actionable.json`;
+const readHandoff = () => JSON.parse(readFileSync(handoffPath, "utf8")).pending;
+const seqOf = (pending) => pending.map((item) => Number(/handoff-case-([0-9]+)/.exec(item.message)[1]));
+mkdirSync(`${home}/state/extensions/omp-primary-watch`, { recursive: true });
+writeFileSync(`${home}/state/.lock`, `${process.pid}\n`);
+const now = Date.now();
+const record = (ageMs, seq) => ({
+  version: 1,
+  token: `${process.pid}-${now - ageMs}-${seq}`,
+  message: `signal: handoff-case-${seq}.turn-ended`,
+  predecessorArmPid: "1",
+});
+// Two records too old to still be the pending close they were written for, and
+// more fresh records than the store is allowed to carry.
+const seeded = [record(3600000, 1), record(1800000, 2)];
+for (let i = 0; i < 40; i += 1) seeded.push(record(0, 100 + i));
+writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: seeded })}\n`);
+const handlers = new Map(); const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, {});
+await new Promise((resolve) => setTimeout(resolve, 750));
+const replayed = readHandoff();
+if (replayed.length !== 32) throw new Error(`the store must be pruned to its cap at load, saw ${replayed.length} records`);
+const seqs = seqOf(replayed);
+if (seqs[0] !== 108 || seqs[seqs.length - 1] !== 139) throw new Error(`the store must keep the newest bounded records, saw ${seqs.join(",")}`);
+if (seqs.some((seq) => seq < 100)) throw new Error("a record too old to be a pending close survived the load prune");
+if (sent.length !== 32) throw new Error(`the replacement must replay the bounded store exactly, saw ${sent.length} wakes`);
+for (const wake of sent) {
+  const seq = Number(/handoff-case-([0-9]+)/.exec(wake.m)[1]);
+  if (seq < 100) throw new Error(`a record that can no longer be pending was replayed: ${wake.m}`);
+}
+// Consuming one replayed wake removes exactly that record from the store.
+await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: sent[0].m }, {});
+const afterConsume = readHandoff();
+if (afterConsume.length !== 31) throw new Error(`a consumed record must leave the store, saw ${afterConsume.length} records`);
+if (seqOf(afterConsume).includes(108)) throw new Error("the consumed record rode the store again");
+await handlers.get("session_shutdown")({}, {});
+if (readHandoff().length !== 31) throw new Error("a shutdown must persist only the bounded pending records");
+// A store holding nothing but records that can no longer be the pending close
+// they were written for must clear itself and replay nothing.
+writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: [record(7200000, 500), record(3600000, 501)] })}\n`);
+const deliveredBefore = sent.length;
+await handlers.get("session_start")({ type: "session_start" }, {});
+await new Promise((resolve) => setTimeout(resolve, 500));
+if (sent.length !== deliveredBefore) throw new Error(`a stale-only store replayed ${sent.length - deliveredBefore} wakes into the replacement session`);
+if (existsSync(handoffPath)) throw new Error("a stale-only store must be cleared at session start");
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch replacement handoff bounds: $out"
+  [ -z "$out" ] || fail "omp watch replacement handoff test printed output: $out"
+  pass ".omp watch extension: the replacement handoff is capped and fresh, an old close is dropped at session start, and a genuinely pending close still replays once"
+}
+
 test_omp_startup_binds_loaded_markers() {
   local repo home bin mode out status script
   repo="$TMP_ROOT/startup/repo"
@@ -715,3 +797,4 @@ test_control_composer_and_model_tables
 test_ownership_proof_is_omp_keyed
 test_turnend_guard_extension_compels_one_continuation
 test_watch_extension_arms_and_delivers
+test_watch_extension_bounds_replacement_handoff
