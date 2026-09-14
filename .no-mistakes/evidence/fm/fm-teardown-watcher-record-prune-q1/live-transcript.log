@@ -1,0 +1,63 @@
+[
+  {
+    "case": "dead-live-grace",
+    "records": [
+      ".hash-fresh",
+      ".hash-gate_fm-live"
+    ]
+  },
+  {
+    "case": "closed-endpoint",
+    "records": []
+  },
+  {
+    "case": "bounded-first-poll",
+    "records": [
+      ".hash-dead-64"
+    ]
+  },
+  {
+    "case": "bounded-next-poll",
+    "records": []
+  },
+  {
+    "case": "empty-poll",
+    "records": []
+  },
+  {
+    "case": "malformed-preserves",
+    "records": [
+      ".hash-gate_fm-live"
+    ]
+  },
+  {
+    "case": "collision-preserves",
+    "records": [
+      ".hash-gate_fm-job_a"
+    ]
+  },
+  {
+    "case": "revival-recheck",
+    "records": [
+      ".count-gate_fm-revived",
+      ".hash-gate_fm-revived",
+      ".paused-gate_fm-revived",
+      ".paused-rechecked-gate_fm-revived",
+      ".paused-resurfaced-gate_fm-revived",
+      ".stale-gate_fm-revived",
+      ".stale-since-gate_fm-revived",
+      ".wedge-escalations-gate_fm-revived",
+      ".writing-resurfaced-gate_fm-revived",
+      ".writing-since-gate_fm-revived"
+    ]
+  },
+  {
+    "backend_inventory": [
+      "gate:keeper",
+      "gate:fm-live",
+      "gate:fm-job.a",
+      "gate:fm-revived"
+    ]
+  }
+]
+All live assertions passed.

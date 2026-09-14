@@ -1,0 +1,4 @@
+ok - watcher retires dead-window records and preserves live-window records
+ok - watcher record retirement is bounded, resumable, and idempotent
+ok - watcher preserves uncertain records and retires only proven missing endpoints
+ok - watcher honors grace and rechecks absence and record age before unlink
