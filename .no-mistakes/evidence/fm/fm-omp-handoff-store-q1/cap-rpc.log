@@ -1,0 +1,2 @@
+{"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],"maxFrameBytes":1048576,"maxReassembledFrameBytes":67108864}
+{"type":"extension_ui_request","id":"157f7ee16e7c70a4","method":"setWidget","widgetKey":"autoresearch"}

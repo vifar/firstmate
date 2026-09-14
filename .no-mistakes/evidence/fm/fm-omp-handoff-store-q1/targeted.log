@@ -1,0 +1,2 @@
+ok - .omp watch extension: fm_watch_arm_omp arms once, repeats as a no-op, and delivers an actionable close as one follow-up
+ok - .omp watch extension: the replacement handoff is capped and fresh, an old close is dropped at session start, and a genuinely pending close still replays once
