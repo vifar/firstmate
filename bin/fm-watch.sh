@@ -507,6 +507,26 @@ inbox_steer_check() {  # <window> <task>
 #
 # The evidence is the one the pane-staleness backbone below already trusts for
 # liveness: this compares a fresh capture against the .hash- marker that backbone
+WATCH_RECORD_LOCKS=()
+
+watch_record_release() {
+  local i
+  for ((i=0; i<${#WATCH_RECORD_LOCKS[@]}; i++)); do
+    fm_lock_release "${WATCH_RECORD_LOCKS[$i]}" || return 1
+  done
+  WATCH_RECORD_LOCKS=()
+}
+
+watch_record_acquire() {
+  local task=$1 window=${2:-} lock
+  [ -n "$task" ] || return 1
+  lock="$STATE/.control-$task.lock"
+  fm_lock_try_acquire "$lock" || return 1
+  WATCH_RECORD_LOCKS+=("$lock")
+  [ -f "$STATE/$task.meta" ] || return 1
+  [ -z "$window" ] || [ "$(fm_backend_target_of_meta "$STATE/$task.meta")" = "$window" ]
+}
+
 # recorded on the previous poll, which is why the derivation lives here with the
 # marker format rather than in the shared classifier. Absorbing here DEFERS a wake
 # rather than swallowing it, and the deferral is BOUNDED: a task's turn-ends may
@@ -540,7 +560,10 @@ inbox_steer_check() {  # <window> <task>
 # begins a new quiet interval; retaining either would make the new interval
 # inherit the prior one. Reached only for a non-afk, no-captain-verb signal, so
 # it never runs on the ordinary per-wake path.
-signal_turnend_panes_churned() {  # <file> ...
+signal_turnend_panes_churned() (
+  WATCH_RECORD_LOCKS=()
+  trap watch_record_release EXIT
+  trap 'exit 1' HUP INT TERM
   [ -e "$CONFIG/turnend-churn-absorb" ] || return 1
   local f base task meta kind w key backend label terminal prev now since now_s absorb_secs marker age
   local rec_task task_index i j count hash_file hash_bytes created
@@ -567,6 +590,9 @@ signal_turnend_panes_churned() {  # <file> ...
     elif [ "$kind" = status ]; then
       signal_statuses[task_index]=1
     fi
+  done
+  for task in "${signal_tasks[@]}"; do
+    watch_record_acquire "$task" || return 1
   done
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
@@ -685,7 +711,7 @@ signal_turnend_panes_churned() {  # <file> ...
     fi
   done
   return 0
-}
+)
 
 recorded_windows() {
   local meta w seen=
@@ -1849,6 +1875,7 @@ pr_poll_control_release() {
 
 watcher_cleanup() {
   local cleanup_status=0 owns_lock=0 transition=release-lock
+  watch_record_release || cleanup_status=1
   pr_poll_control_release || cleanup_status=1
   if [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = "${WATCHER_PID:-}" ]; then
     owns_lock=1
@@ -2219,8 +2246,10 @@ EOF
   # remembers the hash already classified, or the declaration a busy pane's
   # crossed turn bound already handed to the away-mode daemon).
   while IFS= read -r w; do
-    kind=$(window_kind "$w")
+    watch_record_release || exit 1
     task=$(window_to_task "$w" "$STATE")
+    watch_record_acquire "$task" "$w" || continue
+    kind=$(window_kind "$w")
     # Steering-inbox loss detection runs before the secondmate stale
     # exemption below, because a mate's steers land in an inbox too.
     [ -z "$task" ] || inbox_steer_check "$w" "$task"
@@ -2434,6 +2463,7 @@ EOF
       fi
     fi
   done < <(recorded_windows)
+  watch_record_release || exit 1
 
   # Heartbeat: the watcher runs a cheap fleet-scan at a regular cadence no matter
   # what. Time-based via .last-heartbeat mtime; interval doubles per consecutive

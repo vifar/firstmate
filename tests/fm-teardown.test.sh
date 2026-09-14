@@ -1973,7 +1973,7 @@ test_teardown_retires_only_task_watcher_records() {
   write_meta "$case_dir" local-only ship
   key=$(printf '%s' 'firstmate:fm-task-x1' | tr ':/.' '___')
   other_key=$(printf '%s' 'firstmate:fm-other-task' | tr ':/.' '___')
-  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
     : > "$case_dir/state/.$marker-$key"
     : > "$case_dir/state/.$marker-$other_key"
   done
@@ -1982,7 +1982,7 @@ test_teardown_retires_only_task_watcher_records() {
   rc=$?
   set -e
   expect_code 0 "$rc" "watcher-record-cleanup: teardown should succeed: $(cat "$case_dir/stderr")"
-  for marker in hash count stale stale-since paused wedge-escalations churn-since; do
+  for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
     assert_absent "$case_dir/state/.$marker-$key" \
       "watcher-record-cleanup: teardown left the task's .$marker record"
     assert_present "$case_dir/state/.$marker-$other_key" \
@@ -1990,6 +1990,53 @@ test_teardown_retires_only_task_watcher_records() {
   done
   pass "teardown retires only the task's watcher records"
 }
+
+test_teardown_coordinates_with_watcher_capture() (
+  local case_dir pid rc i key
+  case_dir=$(make_case watcher-capture-race)
+  write_meta "$case_dir" local-only ship
+  key=firstmate_fm-task-x1
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *capture-pane*)
+    touch "$FM_HOME/capture-started"
+    while [ ! -e "$FM_HOME/capture-release" ]; do sleep 0.05; done
+    printf 'idle pane\n'
+    ;;
+esac
+SH
+  FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
+    PATH="$case_dir/fakebin:$PATH" FM_POLL=1 FM_CHECK_INTERVAL=999999 \
+    FM_HEARTBEAT=999999 "$ROOT/bin/fm-watch.sh" > "$case_dir/watch.out" 2> "$case_dir/watch.err" &
+  pid=$!
+  trap 'touch "$case_dir/capture-release"; kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+  for ((i=0; i<300; i++)); do
+    [ ! -e "$case_dir/capture-started" ] || break
+    sleep 0.1
+  done
+  assert_present "$case_dir/capture-started" "watcher never reached capture: $(cat "$case_dir/watch.err")"
+  rc=0
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 1 "$rc" "teardown must refuse while watcher owns task lifecycle"
+  assert_present "$case_dir/state/task-x1.meta" "contended teardown removed metadata"
+  touch "$case_dir/capture-release"
+  for ((i=0; i<300; i++)); do
+    [ ! -e "$case_dir/state/.hash-$key" ] || break
+    sleep 0.1
+  done
+  assert_present "$case_dir/state/.hash-$key" "watcher did not publish captured pane"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  trap - EXIT
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "teardown retry failed: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/.hash-$key" "teardown retry left captured pane records"
+  FM_HOME="$case_dir" FM_STATE_OVERRIDE="$case_dir/state" \
+    bash -c '. "$1/bin/fm-watch.sh"; trap watch_record_release EXIT; ! watch_record_acquire task-x1 firstmate:fm-task-x1' _ "$ROOT" \
+    || fail "retired endpoint admitted a stale watcher snapshot"
+  pass "teardown and in-progress watcher capture share task lifecycle exclusion"
+)
 
 test_teardown_watcher_record_cleanup_is_idempotent_when_absent() {
   local case_dir rc
@@ -2222,7 +2269,6 @@ SH
     missing-adapter|missing-parser|missing-explicit-close-helper)
       mkdir -p "$case_dir/test-root"
       cp -R "$ROOT/bin" "$case_dir/test-root/bin"
-      cp "$ROOT/bin/fm-watch-record-lib.sh" "$case_dir/test-root/bin/fm-watch-record-lib.sh"
       if [ "$mode" = missing-adapter ]; then
         rm -f "$case_dir/test-root/bin/backends/herdr.sh"
       elif [ "$mode" = missing-explicit-close-helper ]; then
@@ -3705,6 +3751,13 @@ EOF
   pass "the run abort and the leaked-process reap both complete before the destructive worktree return"
 }
 
+if [ "${1:-}" = --watcher-records ]; then
+  test_teardown_retires_only_task_watcher_records
+  test_teardown_watcher_record_cleanup_is_idempotent_when_absent
+  test_teardown_coordinates_with_watcher_capture
+  exit 0
+fi
+
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
@@ -3718,6 +3771,7 @@ test_secondmate_home_teardown_delivers_final_line_or_refuses
 test_teardown_missing_busy_sidecar_completes
 test_teardown_retires_only_task_watcher_records
 test_teardown_watcher_record_cleanup_is_idempotent_when_absent
+test_teardown_coordinates_with_watcher_capture
 test_herdr_teardown_clears_escalation_marker
 test_herdr_flat_teardown_refuses_orphaning_records_then_retry_completes
 test_herdr_flat_teardown_refuses_records_on_unparseable_presence
