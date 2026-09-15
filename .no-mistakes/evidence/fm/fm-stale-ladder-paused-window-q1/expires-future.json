@@ -1,0 +1,11 @@
+{
+  "name": "expires-future",
+  "status": "paused: [expires=2026-09-15T14:03:31Z]",
+  "output": "",
+  "triage": "[2026-09-15T09:01:34-0500] absorbed stale (paused until 117s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:38-0500] absorbed stale (paused until 114s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:39-0500] absorbed stale (paused until 112s from now, declared time not reached): pausecheck:fm-wait\n",
+  "markers": [
+    ".paused-rechecked-pausecheck_fm-wait",
+    ".paused-pausecheck_fm-wait"
+  ],
+  "pass": true
+}

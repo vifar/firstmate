@@ -1,0 +1,12 @@
+{
+  "name": "expires-far",
+  "status": "paused: [expires=2027-09-15T14:01:42Z]",
+  "output": "stale: pausecheck:fm-wait (paused 301s, awaiting external - the declared time is beyond the recheck cadence; confirm the wait still holds)\n",
+  "triage": "",
+  "markers": [
+    ".paused-resurfaced-pausecheck_fm-wait",
+    ".paused-rechecked-pausecheck_fm-wait",
+    ".paused-pausecheck_fm-wait"
+  ],
+  "pass": true
+}

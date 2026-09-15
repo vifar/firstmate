@@ -1,0 +1,12 @@
+{
+  "name": "open-ended",
+  "status": "paused: awaiting release",
+  "output": "stale: pausecheck:fm-wait (paused 301s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds)\n",
+  "triage": "",
+  "markers": [
+    ".paused-resurfaced-pausecheck_fm-wait",
+    ".paused-rechecked-pausecheck_fm-wait",
+    ".paused-pausecheck_fm-wait"
+  ],
+  "pass": true
+}

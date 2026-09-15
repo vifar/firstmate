@@ -1,0 +1,11 @@
+{
+  "name": "until-future",
+  "status": "paused: until 2026-09-15T14:03:22Z",
+  "output": "",
+  "triage": "[2026-09-15T09:01:23-0500] absorbed stale (paused until 119s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:27-0500] absorbed stale (paused until 116s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:28-0500] absorbed stale (paused until 114s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:30-0500] absorbed stale (paused until 112s from now, declared time not reached): pausecheck:fm-wait\n",
+  "markers": [
+    ".paused-rechecked-pausecheck_fm-wait",
+    ".paused-pausecheck_fm-wait"
+  ],
+  "pass": true
+}

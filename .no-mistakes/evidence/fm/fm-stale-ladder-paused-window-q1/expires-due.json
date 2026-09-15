@@ -1,0 +1,12 @@
+{
+  "name": "expires-due",
+  "status": "paused: [expires=2026-09-15T14:01:10Z]",
+  "output": "stale: pausecheck:fm-wait (paused 62s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)\n",
+  "triage": "",
+  "markers": [
+    ".paused-resurfaced-pausecheck_fm-wait",
+    ".paused-rechecked-pausecheck_fm-wait",
+    ".paused-pausecheck_fm-wait"
+  ],
+  "pass": true
+}

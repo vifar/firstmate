@@ -1,0 +1,72 @@
+[
+  {
+    "name": "until-future",
+    "status": "paused: until 2026-09-15T14:03:22Z",
+    "output": "",
+    "triage": "[2026-09-15T09:01:23-0500] absorbed stale (paused until 119s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:27-0500] absorbed stale (paused until 116s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:28-0500] absorbed stale (paused until 114s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:30-0500] absorbed stale (paused until 112s from now, declared time not reached): pausecheck:fm-wait\n",
+    "markers": [
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  },
+  {
+    "name": "expires-future",
+    "status": "paused: [expires=2026-09-15T14:03:31Z]",
+    "output": "",
+    "triage": "[2026-09-15T09:01:34-0500] absorbed stale (paused until 117s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:38-0500] absorbed stale (paused until 114s from now, declared time not reached): pausecheck:fm-wait\n[2026-09-15T09:01:39-0500] absorbed stale (paused until 112s from now, declared time not reached): pausecheck:fm-wait\n",
+    "markers": [
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  },
+  {
+    "name": "expires-due",
+    "status": "paused: [expires=2026-09-15T14:01:10Z]",
+    "output": "stale: pausecheck:fm-wait (paused 62s, awaiting external - the declared clearing time has passed, rechecked on a long cadence not a wedge; confirm the wait cleared)\n",
+    "triage": "",
+    "markers": [
+      ".paused-resurfaced-pausecheck_fm-wait",
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  },
+  {
+    "name": "expires-far",
+    "status": "paused: [expires=2027-09-15T14:01:42Z]",
+    "output": "stale: pausecheck:fm-wait (paused 301s, awaiting external - the declared time is beyond the recheck cadence; confirm the wait still holds)\n",
+    "triage": "",
+    "markers": [
+      ".paused-resurfaced-pausecheck_fm-wait",
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  },
+  {
+    "name": "open-ended",
+    "status": "paused: awaiting release",
+    "output": "stale: pausecheck:fm-wait (paused 301s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds)\n",
+    "triage": "",
+    "markers": [
+      ".paused-resurfaced-pausecheck_fm-wait",
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  },
+  {
+    "name": "malformed",
+    "status": "paused: [expires=bad]",
+    "output": "stale: pausecheck:fm-wait (paused 301s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds)\n",
+    "triage": "",
+    "markers": [
+      ".paused-resurfaced-pausecheck_fm-wait",
+      ".paused-rechecked-pausecheck_fm-wait",
+      ".paused-pausecheck_fm-wait"
+    ],
+    "pass": true
+  }
+]
