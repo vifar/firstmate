@@ -12,10 +12,13 @@
 # consumer re-derives the identity from the stored URL and refuses any record
 # whose parts do not reconstruct that exact URL.
 #
+# Live polling authenticates the registered sidecar and static check independently
+# of mutable task metadata, so routine metadata updates cannot disable monitoring.
 # A validated exact merged result is retired through a private receipt only
 # after its durable wake is appended.
 # The receipt binds the terminal observation to the canonical registration and
 # lets a restart finish fixed-path removal without executing state-file bytes.
+# Retirement also requires the task metadata's canonical PR identity to match.
 
 FM_PR_PROVIDER=
 FM_PR_URL=
@@ -285,6 +288,9 @@ fm_pr_regular_destination_on_device_or_absent() {
   [ ! -e "$path" ] || [ "$(fm_pr_file_device "$path")" = "$device" ]
 }
 
+# Other home scripts append assignment fields after pr=; their values are opaque
+# here so unrelated metadata growth cannot invalidate registration or retirement.
+# PR identity and any following pr_head retain their dedicated validation.
 fm_pr_metadata_identity_parse() {
   local file=$1 line value pr_count=0 seen_pr=0 post_pr_invalid=0
   FM_PR_META_PROVIDER=
