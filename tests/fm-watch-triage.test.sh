@@ -3377,7 +3377,7 @@ test_afk_busy_declared_pause_hands_off_plain_stale() {
   printf 'Working... (7200.4s) lavish-axi poll' > "$capture_file"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/afk-review-scout.meta"
   record_pi_busy "$state" afk-review-scout
-  printf 'paused: hosting the Lavish review, awaiting captain feedback\n' > "$statusf"
+  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
   sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-afk-review-scout_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   touch -t 200001010000 "$state/afk-review-scout.meta"
@@ -3487,7 +3487,7 @@ SH
   key=$(printf '%s' "$window" | tr ':/.' '___')
   touch -t 200001010000 "$state/afk-ticking-scout.meta"
   date '+%s' > "$state/.afk"
-  # An undeclared busy phase already ran the wedge timer and escalated twice
+  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
   # before the crew declared the wait.
   echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
   printf '2\n' > "$state/.wedge-escalations-$key"
