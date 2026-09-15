@@ -1558,6 +1558,20 @@ test_relaunch_moves_a_drifted_item_back_in_flight() {
   pass "relaunch heals an item that drifted out of In flight while the task stayed live"
 }
 
+test_missing_agent_relaunches_same_task_and_worktree() {
+  local dir out rc=0
+  dir=$(new_case missing-agent rl42)
+  add_ship_task "$dir" rl42 claude
+  : > "$dir/fake/windows"
+  out=$(run_control "$dir" rl42 relaunch --note "recover the interrupted work") || rc=$?
+  expect_code 0 "$rc" "a missing agent should be treated as already stopped"$'\n'"$out"
+  assert_contains "$out" "relaunched rl42" "missing-agent relaunch should report success"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "replacement should run in the recorded endpoint"
+  [ "$(meta_field "$dir" rl42 worktree)" = "$dir/wt" ] || fail "replacement should retain the recorded worktree"
+  assert_grep "recover the interrupted work" "$dir/home/data/rl42/brief.md" "the replacement should receive the progress note"
+  pass "fm-control relaunch: a missing agent is treated as already stopped and replaced in place"
+}
+
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
@@ -1597,6 +1611,7 @@ test_complete_journal_failure_rolls_back_from_durable_phase
 test_prepublication_abort_retires_replacement_wiring_and_busy_state
 test_journal_records_the_checkpoint_it_proved
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter
+test_missing_agent_relaunches_same_task_and_worktree
 test_secondmate_relaunch_refuses_an_unmarked_home
 test_secondmate_checkpoint_refuses_unreadable_child_state
 test_concurrent_relaunch_is_refused
