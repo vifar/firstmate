@@ -937,6 +937,36 @@ test_live_artifact_single_link_and_privacy_validation() {
   pass "live poll and custom-check artifacts require private single-link files"
 }
 
+test_poll_survives_metadata_drift_and_preserves_foreign_refusal() {
+  local dir state before after rc
+  dir=$(make_case poll-metadata-drift)
+  state="$dir/home/state"
+  write_task_meta "$dir"
+  run_check_entry "$dir" task-a https://github.com/o/r/pull/1 >/dev/null 2> "$dir/arm.err" \
+    || fail "metadata drift: could not arm the PR poll"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "metadata drift: initial poll was not authenticated"
+  before=$(cat "$state/task-a.pr-poll-registration")
+  printf '%s\n' 'pr_head=0123456789abcdef0123456789abcdef01234567' >> "$state/task-a.meta"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "metadata drift: mutable metadata disabled the authenticated poll"
+  after=$(cat "$state/task-a.pr-poll-registration")
+  [ "$after" = "$before" ] || fail "metadata drift: registration changed with mutable metadata"
+  set +e
+  FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" \
+    > "$dir/watch.out" 2> "$dir/watch.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "metadata drift: watcher failed: $(cat "$dir/watch.err")"
+  grep -q '^check: .*: merged$' "$dir/watch.out" \
+    || fail "metadata drift: watcher did not surface the merged outcome"
+  write_poll_meta "$state" task-a https://github.com/o/r/pull/1
+  printf '%s\n' 'foreign' > "$state/task-a.pr-poll"
+  ! fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "foreign sidecar remained authenticated"
+  pass "PR poll survives metadata drift and foreign sidecars remain refused"
+}
+
 install_final_publication_fault() {
   local dir=$1
   cat > "$dir/fakebin/mv" <<'SH'
@@ -2429,6 +2459,7 @@ test_authority_persistence_refuses_rebound_metadata
 test_authority_persists_before_control_unlock
 test_teardown_cannot_race_authority_consumption
 test_authority_retirement_preserves_replacement
+test_poll_survives_metadata_drift_and_preserves_foreign_refusal
 test_merged_poll_reports_upward_from_a_secondmate_home_once
 test_different_merged_pr_for_same_task_is_not_absorbed
 test_persistent_secondmate_retirement_is_poll_only
