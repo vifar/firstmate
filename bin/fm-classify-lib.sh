@@ -208,8 +208,10 @@ status_is_paused_or_captain_held() {  # <status-line>
 }
 
 # A condition-aware declared wait: a `paused:` line may say WHEN it expects to
-# clear with `until <YYYY-MM-DDTHH:MM[:SS]Z>` anywhere in its text (UTC only, so
-# no local-zone guess is ever recorded). Prints that time as epoch seconds so a
+# clear with `until <YYYY-MM-DDTHH:MM[:SS]Z>` or the fleet-written
+# `[expires=<YYYY-MM-DDTHH:MM[:SS]Z>]` status shape consumed by watcher and
+# daemon pause rechecks (UTC only, so no local-zone guess is ever recorded).
+# Prints that time as epoch seconds so a
 # supervisor rechecks the wait when the worker said it would clear instead of on
 # the flat cadence; returns 1 when the line is not a pause or declares no time,
 # or the time is malformed, so a bad token falls back to the cadence rather than
@@ -230,15 +232,6 @@ status_paused_until() {  # <status-line> -> epoch on stdout
   esac
   [ -n "$token" ] || return 1
   fm_utc_iso_to_epoch "$token"
-}
- # 0 when a pause carries a verified clearing timestamp.
-status_is_bounded_pause() {
-  status_is_paused "$1" && status_paused_until "$1" >/dev/null
-}
-
- # 0 when a stale-path wait is bounded or captain-held.
-status_is_bounded_pause_or_captain_held() {
-  status_is_bounded_pause "$1" || status_is_captain_held "$1"
 }
 
 # --- durable keyed decisions ------------------------------------------------

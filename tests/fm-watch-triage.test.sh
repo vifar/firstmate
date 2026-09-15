@@ -3270,7 +3270,7 @@ test_busy_declared_pause_is_rechecked_not_wedge_escalated() {
   printf 'Working... (7200.4s) lavish-axi poll' > "$capture_file"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/review-scout.meta"
   record_pi_busy "$state" review-scout
-  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
+  printf 'paused: hosting the Lavish review, awaiting captain feedback\n' > "$statusf"
   sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-review-scout_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   # No completed turn for hours (the single blocking poll call): age the spawn
@@ -3377,7 +3377,7 @@ test_afk_busy_declared_pause_hands_off_plain_stale() {
   printf 'Working... (7200.4s) lavish-axi poll' > "$capture_file"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/afk-review-scout.meta"
   record_pi_busy "$state" afk-review-scout
-  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
+  printf 'paused: hosting the Lavish review, awaiting captain feedback\n' > "$statusf"
   sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-afk-review-scout_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   touch -t 200001010000 "$state/afk-review-scout.meta"
@@ -3482,7 +3482,7 @@ SH
   chmod +x "$fakebin/tmux"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/afk-ticking-scout.meta"
   record_pi_busy "$state" afk-ticking-scout
-  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
+  printf 'paused: hosting the Lavish review, awaiting captain feedback\n' > "$statusf"
   sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-afk-ticking-scout_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   touch -t 200001010000 "$state/afk-ticking-scout.meta"
