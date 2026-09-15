@@ -215,13 +215,30 @@ status_is_paused_or_captain_held() {  # <status-line>
 # or the time is malformed, so a bad token falls back to the cadence rather than
 # silencing the wait.
 status_paused_until() {  # <status-line> -> epoch on stdout
-  local line=$1 token
+  local line=$1 token rest
   status_is_paused "$line" || return 1
-  token=$(printf '%s' "$line" \
-    | sed -n 's/.*[[:space:]][Uu][Nn][Tt][Ii][Ll][[:space:]]\{1,\}\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]Z\).*/\1/p; s/.*[[:space:]][Uu][Nn][Tt][Ii][Ll][[:space:]]\{1,\}\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\).*/\1/p' \
-    | head -1)
+  case "$line" in
+    *'[expires='*)
+      rest=${line#*'[expires='}
+      token=${rest%%]*}
+      ;;
+    *)
+      token=$(printf '%s' "$line" \
+        | sed -n 's/.*[[:space:]][Uu][Nn][Tt][Ii][Ll][[:space:]]\{1,\}\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]Z\).*/\1/p; s/.*[[:space:]][Uu][Nn][Tt][Ii][Ll][[:space:]]\{1,\}\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\).*/\1/p' \
+        | head -1)
+      ;;
+  esac
   [ -n "$token" ] || return 1
   fm_utc_iso_to_epoch "$token"
+}
+ # 0 when a pause carries a verified clearing timestamp.
+status_is_bounded_pause() {
+  status_is_paused "$1" && status_paused_until "$1" >/dev/null
+}
+
+ # 0 when a stale-path wait is bounded or captain-held.
+status_is_bounded_pause_or_captain_held() {
+  status_is_bounded_pause "$1" || status_is_captain_held "$1"
 }
 
 # --- durable keyed decisions ------------------------------------------------
