@@ -3482,12 +3482,11 @@ SH
   chmod +x "$fakebin/tmux"
   printf 'window=%s\nkind=scout\nharness=pi\n' "$window" > "$state/afk-ticking-scout.meta"
   record_pi_busy "$state" afk-ticking-scout
-  printf 'paused: hosting the Lavish review, awaiting captain feedback\n' > "$statusf"
+  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
   sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-afk-ticking-scout_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   touch -t 200001010000 "$state/afk-ticking-scout.meta"
   date '+%s' > "$state/.afk"
-  printf 'paused: hosting the Lavish review, awaiting captain feedback until 2099-01-01T00:00:00Z\n' > "$statusf"
   # before the crew declared the wait.
   echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
   printf '2\n' > "$state/.wedge-escalations-$key"
