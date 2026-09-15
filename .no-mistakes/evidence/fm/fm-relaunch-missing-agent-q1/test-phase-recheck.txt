@@ -1,0 +1,18 @@
+Focused test phase recheck, 2026-09-15
+Command: bash tests/fm-control-relaunch.test.sh
+Exit: 0
+Relevant exact output:
+ok - fm-control relaunch: a missing agent is treated as already stopped and replaced in place
+ok - fm-control relaunch: deterministic replacement acts on preserved instructions delivered through launch argv
+ok - fm-control relaunch: missing Herdr pane is recreated with matching task and endpoint metadata
+
+No failing assertion reproduced. No source or test changes made.
+Deterministic instruction consumption: behavioral test passed; live agent scenario NOT PASSED (not driven live, provider and worker are doubles).
+Herdr adapter identity publication: behavioral test passed; live scenario NOT PASSED (not driven live, Herdr CLI is a double).
+Authenticated replacement continuation: NOT PASSED (not driven; supplied prior evidence records isolated Codex profile stopped at sign-in, and no authenticated disposable profile was supplied).
+Real guarded Herdr missing-endpoint recreation: NOT PASSED (not driven; named-session registry writes fall outside the permitted worktree; an isolated registry cannot meet the helper's existing running-default tripwire prerequisite).
+Read-only command: herdr session list --json
+Exact output:
+{"sessions":[{"default":true,"name":"default","running":true,"session_dir":"/Users/king/.config/herdr","socket_path":"/Users/king/.config/herdr/herdr.sock"},{"default":false,"name":"fm-lab-controller-audit-37952-31942","running":false,"session_dir":"/Users/king/.config/herdr/sessions/fm-lab-controller-audit-37952-31942","socket_path":"/Users/king/.config/herdr/sessions/fm-lab-controller-audit-37952-31942/herdr.sock"}]}
+Also inspected herdr --help and bin/fm-herdr-lab.sh. No lab was provisioned, no --yes used, no fleet endpoint modified.
+Live validation remains inconclusive. This is not a pipeline or live-gate pass.

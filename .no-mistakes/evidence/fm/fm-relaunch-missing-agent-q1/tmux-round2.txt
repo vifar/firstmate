@@ -1,0 +1,36 @@
+BEFORE: recorded task endpoint is absent; keeper window exists
+keeper
+warning: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/home/data/live-missing/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode direct-PR - confirm its definition of done matches
+notice: live-missing ships mode=direct-PR while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched live-missing harness=codex from=codex model=default effort=default backend=tmux endpoint=live:fm-live-missing worktree=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt
+AFTER: endpoint and current directory
+keeper /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt zsh
+fm-live-missing /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt codex
+PRESERVED CONTENTS
+unfinished work
+pending instruction
+PERSISTED RECORD
+window=live:fm-live-missing
+endpoint_task_id=live-missing
+worktree=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt
+project=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/project
+harness=codex
+kind=ship
+mode=direct-PR
+yolo=off
+tasktmp=/tmp/fm-live-missing
+model=default
+effort=default
+spawn_gen=s1789480971.94513.3099
+control_relaunch_tx=93867.20260915T140251Z.26060
+STOPPED SERVER RECOVERY
+warning: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/home/data/live-missing/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode direct-PR - confirm its definition of done matches
+notice: live-missing ships mode=direct-PR while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched live-missing harness=codex from=codex model=default effort=default backend=tmux endpoint=live:fm-live-missing worktree=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt
+zsh /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X zsh
+fm-live-missing /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKQ6400YDF9J9F7SPEKC5X/.relaunch-live/wt codex
+unfinished work
+pending instruction
+DIRECT RELAUNCH INTO LIVE AGENT (must refuse)
+error: task live-missing's endpoint reads 'alive'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh live-missing exit)
+direct_spawn_exit=1

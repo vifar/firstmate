@@ -1,0 +1,24 @@
+Targeted test phase, 2026-09-15
+
+Existing baseline: bash tests/fm-control-relaunch.test.sh passed before edits.
+The selected finding is missing behavioral coverage, not a currently failing test.
+Only tests/fm-control-relaunch.test.sh changed; no production-code fix was needed.
+
+Added executable coverage:
+- test_missing_replacement_acts_on_delivered_instructions runs the emitted launch command with a deterministic worker, decodes the public launch-brief protocol, and produces 42 from the preserved instruction (add 7) and worktree file (35). It also checks the delivered progress note.
+- test_missing_herdr_endpoint_publishes_replacement_identity drives real control/spawn/backend scripts with a stateful CLI double, starting from an absent pane. It checks the recreated endpoint, task label, worktree, published pane/tab/window identity, and completed liveness transaction.
+
+Focused execution used a temporary copy of the test file with only those two function invocations; both passed twice, exit 0.
+Exact final output:
+ok - fm-control relaunch: deterministic replacement acts on preserved instructions delivered through launch argv
+ok - fm-control relaunch: missing Herdr pane is recreated with matching task and endpoint metadata
+
+Counterfactual: the same new cases independently ran against worktree-local copies of bin with fm-control.sh and fm-spawn.sh restored from base b6887a04948592cff53287124e79e073476e886b. Both failed, exit 1, with the reported error:
+error: relaunch of rl43 failed while stopping the old agent and its state is 'missing'
+error: relaunch of rl44 failed while stopping the old agent and its state is 'missing'
+
+Live verdict remains inconclusive, not green:
+- Authentication and real model work resumption remain unproven. Previous live evidence found the isolated Codex profile stopped at sign-in without credentials. Deterministic execution establishes transport and usable context, not authentication or model interpretation.
+- No live Herdr lab was started. Installed herdr --help reports config/log storage under /Users/king/.config/herdr, outside the permitted worktree. It exposes HERDR_CONFIG_PATH for the config file, but no session-storage override. Existing lab guards isolate named endpoints but do not establish worktree-contained session storage. Starting that lab could violate the workspace boundary.
+
+Temporary test drivers and copied base bin tree were removed. Test cleanup removed fixtures. No broad suite, lint, static analysis, pipeline control, push, PR, or CI phase was run.
