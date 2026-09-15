@@ -1,0 +1,156 @@
+$ gh pr view https://github.com/kunchenguid/firstmate/pull/4532 --json state,headRefOid,url
+{"headRefOid":"3503edfab5e9151ff4682d7db31557c21037372b","state":"MERGED","url":"https://github.com/kunchenguid/firstmate/pull/4532"}
+exit=0
+
+$ bin/fm-pr-check.sh drift https://github.com/kunchenguid/firstmate/pull/4532
+armed: state/drift.check.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+
+$ bin/fm-watch.sh
+check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/drift.check.sh: merged
+exit=0
+
+Persisted state: drift poll, sidecar, registration, and retirement receipt removed.
+1789481137	1	check	merged-drift-https://github.com/kunchenguid/firstmate/pull/4532	check: merge landed: drift https://github.com/kunchenguid/firstmate/pull/4532 external
+
+$ bin/fm-wake-drain.sh
+1789481137	1	check	merged-drift-https://github.com/kunchenguid/firstmate/pull/4532	check: merge landed: drift https://github.com/kunchenguid/firstmate/pull/4532 external
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 40346.1789481137.aWPtmR
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 3s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - left untouched because this session lacks verified fleet-lock ownership.
+exit=0
+
+$ bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 40346.1789481137.aWPtmR
+exit=0
+
+$ bin/fm-check-register.sh z-stop
+registered: state/z-stop.check.sh
+exit=0
+
+$ bin/fm-watch.sh
+check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+exit=0
+
+$ bin/fm-wake-drain.sh
+1789481141	2	check	/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh	check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 42152.1789481141.9ANQ3I
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - left untouched because this session lacks verified fleet-lock ownership.
+exit=0
+
+$ bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 42152.1789481141.9ANQ3I
+exit=0
+
+$ bin/fm-pr-check.sh drift https://github.com/kunchenguid/firstmate/pull/4532
+armed: state/drift.check.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+
+$ bin/fm-watch.sh
+check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+exit=0
+
+$ bin/fm-wake-drain.sh
+1789481147	3	check	/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh	check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 45200.1789481147.gGiOXe
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 4s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - left untouched because this session lacks verified fleet-lock ownership.
+exit=0
+
+$ bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 45200.1789481147.gGiOXe
+exit=0
+
+$ bin/fm-pr-check.sh foreign https://github.com/kunchenguid/firstmate/pull/4532
+armed: state/foreign.check.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 5s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+
+$ bin/fm-watch.sh
+check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+exit=0
+
+$ bin/fm-wake-drain.sh
+1789481152	4	check	/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh	check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 47080.1789481152.Mt3Djo
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - left untouched because this session lacks verified fleet-lock ownership.
+exit=0
+
+$ bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 47080.1789481152.Mt3Djo
+exit=0
+
+$ bin/fm-pr-check.sh unauthenticated https://github.com/kunchenguid/firstmate/pull/4532
+armed: state/unauthenticated.check.sh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  3 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+
+$ bin/fm-watch.sh
+check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+exit=0
+
+$ bin/fm-wake-drain.sh
+1789481155	5	check	/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh	check: /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2JKNRAX4BS4YK4HP1KYY1Q0/.phase-test/live2/state/z-stop.check.sh: control-cycle
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 5 --recovery-generation 49008.1789481155.q2ur2Q
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  3 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
+●  This read-only session should report the lapse, not repair it.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - left untouched because this session lacks verified fleet-lock ownership.
+exit=0
+
+$ bin/fm-wake-drain.sh --ack-through 5 --recovery-generation 49008.1789481155.q2ur2Q
+exit=0
+
+All live assertions passed: metadata drift, retirement, subsequent cycle, rearm absorption, foreign sidecar and missing registration refusal.
