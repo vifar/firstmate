@@ -947,7 +947,7 @@ test_poll_survives_metadata_drift_and_preserves_foreign_refusal() {
   fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
     || fail "metadata drift: initial poll was not authenticated"
   before=$(cat "$state/task-a.pr-poll-registration")
-  printf '%s\n' 'pr_head=0123456789abcdef0123456789abcdef01234567' >> "$state/task-a.meta"
+  printf '%s\n' 'decisions_reviewed=1' 'decision_keys=review-call' 'backend=tmux' >> "$state/task-a.meta"
   fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
     || fail "metadata drift: mutable metadata disabled the authenticated poll"
   after=$(cat "$state/task-a.pr-poll-registration")
@@ -960,8 +960,28 @@ test_poll_survives_metadata_drift_and_preserves_foreign_refusal() {
   [ "$rc" -eq 0 ] || fail "metadata drift: watcher failed: $(cat "$dir/watch.err")"
   grep -q '^check: .*: merged$' "$dir/watch.out" \
     || fail "metadata drift: watcher did not surface the merged outcome"
-  write_poll_meta "$state" task-a https://github.com/o/r/pull/1
-  printf '%s\n' 'foreign' > "$state/task-a.pr-poll"
+  ack_watcher_cycle "$state" || fail "metadata drift: merge acknowledgement failed"
+  assert_poll_absent "$state" task-a
+  add_stop_custom_check "$dir"
+  rm -f "$state/.last-check"
+  FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" \
+    > "$dir/watch-next.out" 2> "$dir/watch-next.err" \
+    || fail "metadata drift: subsequent watcher failed"
+  case "$(cat "$dir/watch-next.out")" in
+    check:*z-stop.check.sh:*stop-cycle) ;;
+    *) fail "metadata drift: subsequent watcher did not reach control check" ;;
+  esac
+  ! grep -F 'task-a.check.sh: merged' "$dir/watch-next.out" >/dev/null \
+    || fail "metadata drift: duplicate merge notification"
+
+  dir=$(make_case metadata-drift-foreign-sidecar)
+  state="$dir/home/state"
+  write_task_meta "$dir"
+  run_check_entry "$dir" task-a https://github.com/o/r/pull/1 >/dev/null 2> "$dir/arm.err" \
+    || fail "foreign sidecar: could not arm separate poll"
+  fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
+    || fail "foreign sidecar: separate registration was not valid"
+  printf '%s\n' github https://github.com/o/r/pull/2 github.com o/r 2 > "$state/task-a.pr-poll"
   ! fm_pr_poll_artifacts_valid "$state" task-a "$POLL" \
     || fail "foreign sidecar remained authenticated"
   pass "PR poll survives metadata drift and foreign sidecars remain refused"
