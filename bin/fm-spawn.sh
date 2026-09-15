@@ -2807,16 +2807,44 @@ fi
 
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
-  # Adopt the recorded endpoint instead of creating one. This is what keeps a
-  # relaunch a REPLACEMENT rather than a second copy of the task: no new
-  # terminal, no second worktree, and every uncommitted change left exactly
-  # where the previous agent left it.
   T=$RELAUNCH_TARGET
-  # A secondmate's home already resolved WT above through the same validation a
-  # fresh secondmate spawn uses; every other kind takes the recorded worktree.
   [ "$KIND" = secondmate ] || WT=$RELAUNCH_WT
   WT_TARGET=$T
   SES=${T%%:*}
+  if [ "$RELAUNCH_STATE" = missing ]; then
+    case "$BACKEND" in
+      tmux)
+        tmux has-session -t "$SES" 2>/dev/null || tmux new-session -d -s "$SES" || exit 1
+        WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+        T="$SES:$W"
+        ;;
+      herdr)
+        fm_backend_herdr_server_ensure "$HERDR_SES" || exit 1
+        HERDR_SEEDED_DEFAULT_TAB_ID=
+        case "$(fm_backend_herdr_workspace_presence_state "$HERDR_SES" "$HERDR_WORKSPACE_ID")" in
+          present) CONTAINER="$HERDR_SES:$HERDR_WORKSPACE_ID" ;;
+          dead)
+            HERDR_LABEL_HOME=$FM_HOME
+            [ "$KIND" != secondmate ] || HERDR_LABEL_HOME=$WT
+            HERDR_CONTAINER_RAW=$(HERDR_SESSION="$HERDR_SES" FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_container_ensure "$WT" other-home) || exit 1
+            CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
+            HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
+            HERDR_WORKSPACE_ID=${CONTAINER#*:}
+            ;;
+          *)
+            echo "error: cannot establish the recorded herdr workspace's state for $ID" >&2
+            exit 1
+            ;;
+        esac
+        HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+        read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+$HERDR_TASK_IDS
+EOF
+        T="$HERDR_SES:$HERDR_PANE_ID"
+        WT_TARGET=$T
+        ;;
+    esac
+  fi
 else
 case "$BACKEND" in
   tmux)

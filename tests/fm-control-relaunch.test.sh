@@ -57,7 +57,20 @@ make_tmux_stub() {  # <dir>
 set -u
 D=$FM_FAKE_DIR
 case "${1:-}" in
+  new-window)
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -n) printf '%s\n' "$2" >> "$D/windows"; shift 2 ;;
+        -c) printf '%s' "$2" > "$D/cwd"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    printf 'zsh' > "$D/command"
+    printf '@42\n'
+    exit 0 ;;
   send-keys)
+    [ -s "$D/windows" ] || exit 1
     shift
     literal=0
     while [ $# -gt 0 ]; do
@@ -96,6 +109,7 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
+    [ -s "$D/windows" ] || exit 1
     for a in "$@"; do
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
@@ -1563,8 +1577,14 @@ test_missing_agent_relaunches_same_task_and_worktree() {
   dir=$(new_case missing-agent rl42)
   add_ship_task "$dir" rl42 claude
   : > "$dir/fake/windows"
+  printf 'interrupted changes\n' > "$dir/wt/preserved.txt"
+  mkdir -p "$dir/home/state/rl42.inbox"
+  printf 'pending steer\n' > "$dir/home/state/rl42.inbox/1"
   out=$(run_control "$dir" rl42 relaunch --note "recover the interrupted work") || rc=$?
   expect_code 0 "$rc" "a missing agent should be treated as already stopped"$'\n'"$out"
+  assert_grep 'fm-rl42' "$dir/fake/windows" "replacement endpoint must exist"
+  assert_grep 'interrupted changes' "$dir/wt/preserved.txt" "local changes must survive"
+  assert_grep 'pending steer' "$dir/home/state/rl42.inbox/1" "pending steering must survive"
   assert_contains "$out" "relaunched rl42" "missing-agent relaunch should report success"
   [ "$(cat "$dir/fake/command")" = claude ] || fail "replacement should run in the recorded endpoint"
   [ "$(meta_field "$dir" rl42 worktree)" = "$dir/wt" ] || fail "replacement should retain the recorded worktree"
