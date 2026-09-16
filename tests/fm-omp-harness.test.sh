@@ -545,6 +545,10 @@ test_watch_extension_arms_and_delivers() {
   repo="$TMP_ROOT/watch/repo"; home="$TMP_ROOT/watch/home"
   install_omp_extension_fixture "$repo"
   mkdir -p "$home/state"
+  # A merged poll retires its own check script before it emits the wake
+  # (bin/fm-watch.sh), while the task's own record still exists, so the fixture
+  # stands up that record: the close names live work and must be delivered.
+  printf 'window=default:w1A:p1\nharness=omp\n' > "$home/state/merged.meta"
   # The first arm child closes with one actionable reason; every successor
   # stays up, so exactly one wake exists to consume.
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
@@ -887,6 +891,194 @@ EOF
   pass "omp extension markers record the outer lock-owning omp ancestor from a nested worker"
 }
 
+# A close must be replayed or delivered only while the work it names can still
+# exist. Two distinct holes let dead work re-announce itself: the guard returned
+# true unconditionally for any kind it could not resolve (stale/heartbeat), and
+# it was gated on the replacement set, so an ordinary in-memory re-delivery of a
+# finished close skipped it entirely. Both cases below assert the drop, and both
+# also assert that genuinely live work still gets through, so the fix cannot
+# pass by suppressing everything.
+test_watch_extension_gates_close_liveness() {
+  local repo home out status
+  repo="$TMP_ROOT/liveness/repo"; home="$TMP_ROOT/liveness/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The arm child starts, confirms a handling delivery, and stays up: this case
+  # produces no wakes of its own, so every delivery observed is a replay.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+exec sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const home = process.env.FM_HOME;
+const state = `${home}/state`;
+const handoffPath = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
+mkdirSync(`${state}/extensions/omp-primary-watch`, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const record = (seq, message) => ({
+  version: 1,
+  token: `${process.pid}-${Date.now()}-${seq}`,
+  message,
+  predecessorArmPid: "1",
+});
+const readHandoff = () => JSON.parse(readFileSync(handoffPath, "utf8")).pending;
+const handlers = new Map(); const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+// Live work the guard must still admit: a task with a meta, a task-scoped check
+// whose script a merged poll already retired (bin/fm-watch.sh retires before it
+// wakes), and the fleet-scoped bare heartbeat.
+writeFileSync(`${state}/live-signal-q1.turn-ended`, "turn ended\n");
+writeFileSync(`${state}/live-signal-q1.meta`, "window=default:w5A:p1\nharness=omp\n");
+writeFileSync(`${state}/live-stale-q1.meta`, "window=default:w6B:p1\nharness=omp\n");
+writeFileSync(`${state}/live-check-q1.meta`, "window=default:w7C:p1\nharness=omp\n");
+// A status file whose task record was already removed, and a status path with
+// both halves present, to show signal resolution still checks both.
+writeFileSync(`${state}/orphan-q1.status`, "done\n");
+const seeded = [
+  record(1, "stale: default:w4Z:p2"),
+  record(2, "stale: default:w4Z:p2 (idle 900s, possible wedge, escalation 2)"),
+  record(3, "heartbeat"),
+  record(4, "heartbeat: default:w9Z:p1"),
+  record(5, `signal: ${state}/dead-signal-q1.turn-ended`),
+  record(6, `signal: ${state}/live-signal-q1.turn-ended`),
+  record(7, `signal: ${state}/orphan-q1.status`),
+  record(8, `check: ${state}/dead-check-q1.check.sh: merged`),
+  record(9, `check: ${state}/live-check-q1.check.sh: merged`),
+  record(10, "stale: default:w6B:p1"),
+];
+writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: seeded })}\n`);
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, {});
+await new Promise((resolve) => setTimeout(resolve, 750));
+const replayed = sent.map((wake) => wake.m);
+const sawAny = (needle) => replayed.some((text) => text.includes(needle));
+// Hole 1: an unresolvable stale close for a task with no meta is dead work.
+if (sawAny("stale: default:w4Z:p2")) {
+  throw new Error(`a stale close for a task with no meta was replayed: ${JSON.stringify(replayed)}`);
+}
+// The suffixed heartbeat names a window too, so it resolves the same way.
+if (sawAny("heartbeat: default:w9Z:p1")) throw new Error("a windowed heartbeat for a missing task was replayed");
+// Both dead state references, in each shape the guard resolves.
+if (sawAny("dead-signal-q1")) throw new Error("a signal close whose referenced files are gone was replayed");
+if (sawAny("orphan-q1.status")) throw new Error("a signal close whose task record was removed was replayed");
+if (sawAny("dead-check-q1")) throw new Error("a check close for a task with no meta and no script was replayed");
+// Live work still gets through, each exactly once.
+for (const [needle, label] of [
+  ["stale: default:w6B:p1", "a stale close for a window whose task still exists"],
+  [`signal: ${state}/live-signal-q1.turn-ended`, "a live signal close"],
+  [`check: ${state}/live-check-q1.check.sh: merged`, "a check close whose task record still exists"],
+  ["heartbeat", "the fleet-scoped heartbeat"],
+]) {
+  const count = replayed.filter((text) => text.includes(needle)).length;
+  if (count !== 1) throw new Error(`${label} must replay exactly once, saw ${count}: ${JSON.stringify(replayed)}`);
+}
+if (readHandoff().length !== 4) throw new Error(`dead closes must leave the store, saw ${readHandoff().length} records`);
+// Consuming a live replayed close removes exactly that record: a genuinely
+// pending close still replays once across a replacement and is not duplicated.
+const liveText = sent.find((wake) => wake.m.includes("live-signal-q1.turn-ended")).m;
+await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: liveText }, {});
+if (readHandoff().length !== 3) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
+if (readHandoff().some((item) => item.message.includes("live-signal-q1"))) throw new Error("the consumed close rode the store again");
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch close liveness: $out"
+  [ -z "$out" ] || fail "omp watch close liveness test printed output: $out"
+  pass ".omp watch extension: a close for finished work is dropped for every kind, while live work still replays exactly once"
+}
+
+# Hole 2: the guard was reached only for replacement closes, so an ordinary
+# in-memory pending close - one this very session created from its own arm
+# child - was delivered with no liveness check at all. Drive that exact path:
+# an arm child reports work that is already gone, and a live one alongside it.
+test_watch_extension_gates_non_replacement_delivery() {
+  local repo home out status
+  repo="$TMP_ROOT/live-path/repo"; home="$TMP_ROOT/live-path/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The first arm child reports dead work on one run and live work on the next;
+  # every successor stays up, so the only deliveries are those two closes.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+if [ ! -e "${FM_HOME:?}/state/.e2e-dead-fired" ]; then
+  : > "$FM_HOME/state/.e2e-dead-fired"
+  sleep 1
+  printf 'signal: %s/state/dead-arm-q1.turn-ended\n' "$FM_HOME"
+  exit 0
+fi
+if [ ! -e "${FM_HOME:?}/state/.e2e-live-fired" ]; then
+  : > "$FM_HOME/state/.e2e-live-fired"
+  sleep 1
+  printf 'signal: %s/state/live-arm-q1.turn-ended\n' "$FM_HOME"
+  exit 0
+fi
+exec sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { mkdirSync, writeFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+mkdirSync(state, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+// Only one of the two referenced tasks exists: the other is finished work whose
+// files are already gone, exactly as a dead pane leaves nothing behind.
+writeFileSync(`${state}/live-arm-q1.turn-ended`, "turn ended\n");
+writeFileSync(`${state}/live-arm-q1.meta`, "window=default:w8D:p1\nharness=omp\n");
+const handlers = new Map(); const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, {});
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 4000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+await waitUntil(() => sent.length >= 1, "the live non-replacement close");
+if (sent.some((wake) => wake.m.includes("dead-arm-q1"))) {
+  throw new Error(`a finished close on the non-replacement path was delivered: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+if (!sent.some((wake) => wake.m.includes("live-arm-q1.turn-ended"))) {
+  throw new Error(`a live close on the non-replacement path was not delivered: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+if (sent.filter((wake) => wake.m.includes("live-arm-q1")).length !== 1) {
+  throw new Error("the live non-replacement close was delivered more than once");
+}
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch non-replacement liveness: $out"
+  [ -z "$out" ] || fail "omp watch non-replacement liveness test printed output: $out"
+  pass ".omp watch extension: an ordinary non-replacement close is liveness-checked too, and live work still delivers"
+}
+
 test_detection_anchored_name_and_marker_precedence
 test_omp_startup_binds_loaded_markers
 test_omp_markers_record_outer_omp_ancestor
@@ -901,3 +1093,5 @@ test_ownership_proof_is_omp_keyed
 test_turnend_guard_extension_compels_one_continuation
 test_watch_extension_arms_and_delivers
 test_watch_extension_bounds_replacement_handoff
+test_watch_extension_gates_close_liveness
+test_watch_extension_gates_non_replacement_delivery
