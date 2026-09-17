@@ -362,7 +362,10 @@ function validatePendingActionable(value: unknown): PendingActionableClose {
 //     deliberate statements about a known kind, never a default.
 // An unrecognized line is never assumed live.
 function metaExists(task: string): boolean {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(task)) return false;
+  // Keyed on the creation alphabet in bin/fm-pr-lib.sh (fm_task_id_path_safe,
+  // which fm_task_id_creation_valid wraps): any non-empty run of A-Za-z0-9._-
+  // that does not begin with '.', so a leading '_' or '-' is a supported task.
+  if (!task || task.startsWith(".") || /[^A-Za-z0-9._-]/.test(task)) return false;
   return existsSync(`${state}/${task}.meta`);
 }
 
