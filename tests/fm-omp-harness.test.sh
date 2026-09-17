@@ -943,8 +943,15 @@ writeFileSync(`${state}/live-signal-q1.meta`, "window=default:w5A:p1\nharness=om
 writeFileSync(`${state}/live-stale-q1.meta`, "window=default:w6B:p1\nharness=omp\n");
 writeFileSync(`${state}/live-check-q1.meta`, "window=default:w7C:p1\nharness=omp\n");
 // A status file whose task record was already removed, and a status path with
-// both halves present, to show signal resolution still checks both.
+// both halves present, to show signal resolution still checks both. This is the
+// pair that proves the channel-log exemption stays narrow: `orphan-q1.status` is
+// an ordinary torn-down task log and must still be dropped, while the
+// home-scoped parent-channel log beside it must stay live (see record 11).
 writeFileSync(`${state}/orphan-q1.status`, "done\n");
+// A remote secondmate home parent-channel log: state-resident, appended by the
+// parent-channel publishers, and carrying no task meta by construction
+// (bin/fm-parent-channel-lib.sh owns its destination).
+writeFileSync(`${state}/parent-replies.status`, "done [key=merged-q1]: child finished\n");
 const seeded = [
   record(1, "stale: default:w4Z:p2"),
   record(2, "stale: default:w4Z:p2 (idle 900s, possible wedge, escalation 2)"),
@@ -956,6 +963,7 @@ const seeded = [
   record(8, `check: ${state}/dead-check-q1.check.sh: merged`),
   record(9, `check: ${state}/live-check-q1.check.sh: merged`),
   record(10, "stale: default:w6B:p1"),
+  record(11, `signal: ${state}/parent-replies.status`),
 ];
 writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: seeded })}\n`);
 const mod = await import(pathToFileURL(process.env.EXT).href);
@@ -980,16 +988,22 @@ for (const [needle, label] of [
   [`signal: ${state}/live-signal-q1.turn-ended`, "a live signal close"],
   [`check: ${state}/live-check-q1.check.sh: merged`, "a check close whose task record still exists"],
   ["heartbeat", "the fleet-scoped heartbeat"],
+  // F2: the home-scoped parent-channel log has no task meta by construction, so
+  // the guard must exempt it by name while still dropping the torn-down task log
+  // above. Before the fix this close was dropped, losing the routed parent reply;
+  // after it, this one case flips to replayed while `orphan-q1.status` above
+  // stays dropped.
+  [`signal: ${state}/parent-replies.status`, "a signal close naming the home-scoped parent-channel log"],
 ]) {
   const count = replayed.filter((text) => text.includes(needle)).length;
   if (count !== 1) throw new Error(`${label} must replay exactly once, saw ${count}: ${JSON.stringify(replayed)}`);
 }
-if (readHandoff().length !== 4) throw new Error(`dead closes must leave the store, saw ${readHandoff().length} records`);
+if (readHandoff().length !== 5) throw new Error(`dead closes must leave the store, saw ${readHandoff().length} records`);
 // Consuming a live replayed close removes exactly that record: a genuinely
 // pending close still replays once across a replacement and is not duplicated.
 const liveText = sent.find((wake) => wake.m.includes("live-signal-q1.turn-ended")).m;
 await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: liveText }, {});
-if (readHandoff().length !== 3) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
+if (readHandoff().length !== 4) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
 if (readHandoff().some((item) => item.message.includes("live-signal-q1"))) throw new Error("the consumed close rode the store again");
 await handlers.get("session_shutdown")({}, {});
 process.exit(0);

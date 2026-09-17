@@ -338,7 +338,11 @@ function validatePendingActionable(value: unknown): PendingActionableClose {
 // so a finished task can never re-announce itself. Each kind resolves its work
 // from the message:
 //   - `signal:` names state paths directly, so each one must still exist and,
-//     when it is a `.status`/`.turn-ended` path, its task must still have a meta.
+//     when it is a `.status`/`.turn-ended` path, its task must still have a meta
+//     unless that path is a home-scoped channel log rather than a task (see
+//     below). This is the signal-side counterpart of the check branch's
+//     home-scoped exemption: both keep a reference live when it names no task at
+//     all, and neither keeps a dead task record live.
 //   - `check: <state>/<task>.check.sh: ...` names a task-scoped poll, live while
 //     that task still has a meta OR the armed check script still exists. The
 //     second half is deliberate: a merged-PR poll retires its own script before
@@ -361,6 +365,20 @@ function metaExists(task: string): boolean {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(task)) return false;
   return existsSync(`${state}/${task}.meta`);
 }
+
+// Names of state-resident logs that are home-scoped channels rather than tasks,
+// so no `<name>.meta` can exist for them by construction. The only production
+// entry is a remote secondmate home's parent-channel log: its destination is
+// owned by bin/fm-parent-channel-lib.sh's remote route, and
+// bin/secondmate-report.sh, bin/fm-inactive-reconcile.sh, and
+// bin/fm-merge-outcome-lib.sh append to it (bin/fm-procevent-remote-reply.sh
+// mirrors it into the parent's own status stream). Requiring a task meta there
+// would drop a routed reply the parent must read.
+// This is a deliberate name-keyed allow-list, never a wildcard, a suffix, or a
+// default that keeps any meta-less reference live - a torn-down task leaves a
+// `.status` file with no meta too, and that close must still be dropped.
+// bin/fm-pending-reply-lib.sh keys the same channel-log exemption on this name.
+const homeScopedChannelLogs: Record<string, true> = { "parent-replies.status": true };
 
 // The window's task, resolved the way bin/fm-classify-lib.sh's window_to_task
 // does: the recorded window=/terminal= target first, then the tmux-shaped
@@ -409,8 +427,10 @@ function signalWorkIsLive(line: string): boolean {
   if (references.length === 0) return true;
   for (const path of references) {
     if (!existsSync(path)) return false;
+    const relative = path.slice(state.length + 1);
+    if (homeScopedChannelLogs[relative]) continue;
     const suffix = path.endsWith(".turn-ended") ? ".turn-ended" : path.endsWith(".status") ? ".status" : "";
-    if (suffix && !metaExists(path.slice(state.length + 1, -suffix.length))) return false;
+    if (suffix && !metaExists(relative.slice(0, -suffix.length))) return false;
   }
   return true;
 }
