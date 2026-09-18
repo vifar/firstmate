@@ -1,0 +1,21 @@
+=== OFF: both keys absent ===
+exit=0
+stdout=<<>>
+stderr=dispatch-resolve: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY absent from the environment and /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-resolve-typed-live.fC1MUn/home/.env)
+curl_called=no
+
+=== Gateway stub clear path ===
+exit=0
+dispatch-resolve:
+  status: error
+  reason: node not installed
+stderr=dispatch-resolve: error (node not installed)
+curl_called=no
+
+=== Adversarial: chosen mass 0.3 must stay ambiguous (not clear via global max 0.65) ===
+exit=0
+dispatch-resolve:
+  status: error
+  reason: node not installed
+stderr=dispatch-resolve: error (node not installed)
+curl_called=no

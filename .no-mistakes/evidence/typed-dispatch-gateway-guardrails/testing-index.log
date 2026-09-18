@@ -1,0 +1,78 @@
+=== Evidence index ===
+total 44
+drwxr-xr-x 11 king staff  352 Sep 18 00:43 .
+drwxr-xr-x 56 king staff 1792 Sep 18 00:37 ..
+-rw-r--r--  1 king staff  576 Sep 18 00:39 bootstrap-g1-g2.live.log
+-rw-r--r--  1 king staff   69 Sep 18 00:38 fm-bootstrap.test.log
+-rw-r--r--  1 king staff 1581 Sep 18 00:38 fm-dispatch-resolve.test.log
+-rw-r--r--  1 king staff 5102 Sep 18 00:42 fm-spawn-dispatch-profile.test.log
+-rw-r--r--  1 king staff 1198 Sep 18 00:42 resolve-gateway.live.log
+-rw-r--r--  1 king staff  660 Sep 18 00:41 resolve-off-gateway.live.log
+-rw-r--r--  1 king staff 5277 Sep 18 00:40 spawn-g3-g5.live.log
+-rw-r--r--  1 king staff  345 Sep 18 00:43 spawn-typed-extract.log
+-rw-r--r--  1 king staff   23 Sep 18 00:43 testing-index.log
+
+=== resolve suite last lines ===
+ok - API, transport, and response failures are error outcomes with exit 0
+ok - configuration errors exit 2 before any network call
+ok - gateway transport reaches clear via FM_DISPATCH_JEV_GATEWAY stub
+ok - gateway confidence prefers answer, metadata, then chosen mass (never global max)
+ok - gateway chosen-mass confidence cannot clear a below-floor rule
+# all fm-dispatch-resolve tests passed
+
+=== spawn typed extract ===
+ok - typed dispatch armed without receipt refuses ship spawn
+ok - clear matching receipt allows spawn and records provenance
+ok - clear mismatch without override refuses
+ok - override file allows clear profile mismatch
+ok - FM_TYPED_DISPATCH=off disarms receipt gate even when a typed key is present
+# all fm-spawn-dispatch-profile tests passed
+
+=== bootstrap G1/G2 markers ===
+TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (only 1 rule(s))
+TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (single catch-all when)
+
+=== gateway live markers ===
+  status: clear
+  rule: rule_4 (A simple bug fix with a stated root cause.)   confidence: 0.91
+  profile: --harness 'cursor' --model 'cursor-grok-4.6-medium'
+curl_called=no
+=== Adversarial low chosen-mass confidence ===
+  status: ambiguous
+  rule: rule_2 (Current events or live web research.)   confidence: 0.3
+  reason: confidence 0.3 below floor 0.6
+curl_called=no
+
+=== resolve off markers ===
+exit=0
+stdout=<<>>
+stderr=dispatch-resolve: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY absent from the environment and /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-resolve-typed-live.fC1MUn/home/.env)
+curl_called=no
+exit=0
+stderr=dispatch-resolve: error (node not installed)
+curl_called=no
+exit=0
+stderr=dispatch-resolve: error (node not installed)
+curl_called=no
+
+=== spawn G3-G5 markers ===
+exit=1
+error: typed dispatch is armed and config/crew-dispatch.json is active - write data/receipt-missing-live/dispatch-resolve from bin/fm-dispatch-resolve.sh before spawning (or set FM_TYPED_DISPATCH=off). For a deliberate profile override, also write data/receipt-missing-live/dispatch-override.md with a one-line reason.
+exit=0
+dispatch_status=clear
+dispatch_rule=rule_1
+dispatch_confidence=0.91
+dispatch_source=receipt
+exit=1
+error: spawn profile does not match clear dispatch receipt for receipt-mismatch-live (receipt: --harness 'claude' --model 'sonnet' --effort 'medium'; spawn: --harness claude --model opus --effort high). Pass the receipt profile, or write data/receipt-mismatch-live/dispatch-override.md with a one-line reason.
+=== override allows mismatch with dispatch_source=override ===
+exit=0
+dispatch_status=clear
+dispatch_rule=rule_1
+dispatch_confidence=0.91
+dispatch_source=override
+dispatch_override=captain asked for opus on this one
+exit=0
+OK: no dispatch provenance while disarmed

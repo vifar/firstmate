@@ -1,0 +1,8 @@
+=== G1: dispatch file present, no typed keys ===
+MISSING: tasks-axi (install: npm install -g tasks-axi)
+TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (only 1 rule(s))
+=== G2: single catch-all when ===
+MISSING: tasks-axi (install: npm install -g tasks-axi)
+TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (single catch-all when)

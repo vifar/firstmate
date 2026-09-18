@@ -1,0 +1,6 @@
+ok - typed dispatch armed without receipt refuses ship spawn
+ok - clear matching receipt allows spawn and records provenance
+ok - clear mismatch without override refuses
+ok - override file allows clear profile mismatch
+ok - FM_TYPED_DISPATCH=off disarms receipt gate even when a typed key is present
+# all fm-spawn-dispatch-profile tests passed

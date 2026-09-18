@@ -1,0 +1,81 @@
+=== G3: armed spawn without receipt refuses ===
+exit=1
+error: typed dispatch is armed and config/crew-dispatch.json is active - write data/receipt-missing-live/dispatch-resolve from bin/fm-dispatch-resolve.sh before spawning (or set FM_TYPED_DISPATCH=off). For a deliberate profile override, also write data/receipt-missing-live/dispatch-override.md with a one-line reason.
+meta_exists=no
+
+=== G4/G5: clear match allows and records meta provenance ===
+exit=0
+warning: /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/home/data/receipt-match-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned receipt-match-live harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-receipt-match-live worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/wt base=main
+--- meta ---
+window=firstmate:fm-receipt-match-live
+endpoint_task_id=receipt-match-live
+worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/wt
+project=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-match/project
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-receipt-match-live
+model=sonnet
+effort=medium
+dispatch_status=clear
+dispatch_rule=rule_1
+dispatch_confidence=0.91
+dispatch_source=receipt
+busy_gen=g1789710031.49334.4990
+spawn_gen=s1789710031.46798.14770
+
+=== G5 adversarial: clear mismatch without override refuses ===
+exit=1
+error: spawn profile does not match clear dispatch receipt for receipt-mismatch-live (receipt: --harness 'claude' --model 'sonnet' --effort 'medium'; spawn: --harness claude --model opus --effort high). Pass the receipt profile, or write data/receipt-mismatch-live/dispatch-override.md with a one-line reason.
+
+=== override allows mismatch with dispatch_source=override ===
+exit=0
+warning: /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/home/data/receipt-override-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned receipt-override-live harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-receipt-override-live worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/wt base=main
+--- meta ---
+window=firstmate:fm-receipt-override-live
+endpoint_task_id=receipt-override-live
+worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/wt
+project=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-override/project
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-receipt-override-live
+model=opus
+effort=high
+dispatch_status=clear
+dispatch_rule=rule_1
+dispatch_confidence=0.91
+dispatch_source=override
+dispatch_override=captain asked for opus on this one
+busy_gen=g1789710035.51683.9013
+spawn_gen=s1789710035.50786.10192
+
+=== FM_TYPED_DISPATCH=off disarms despite key ===
+exit=0
+warning: /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/home/data/receipt-off-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned receipt-off-live harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-receipt-off-live worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/wt base=main
+--- meta ---
+window=firstmate:fm-receipt-off-live
+endpoint_task_id=receipt-off-live
+worktree=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/wt
+project=/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-typed-live.lgx5Fq/receipt-off/project
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+tasktmp=/tmp/fm-receipt-off-live
+model=sonnet
+effort=medium
+busy_gen=g1789710039.54528.8996
+spawn_gen=s1789710039.52173.3156
+OK: no dispatch provenance while disarmed

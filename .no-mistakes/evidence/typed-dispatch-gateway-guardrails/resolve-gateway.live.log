@@ -1,0 +1,26 @@
+node=/opt/homebrew/bin/node
+=== Gateway stub clear ===
+exit=0
+dispatch-resolve:
+  status: clear
+  model: typesafe-ai/jev   latency_ms: 0   tokens: 100/20
+  rule: rule_4 (A simple bug fix with a stated root cause.)   confidence: 0.91
+  probabilities: default=0.01 rule_1=0.01 rule_2=0.01 rule_3=0.01 rule_4=0.96
+  note: rule matched
+  candidate: cursor:cursor-grok-4.6-medium  provider=cursor  scope=all_models  remaining=91%  spendPriority=0.7597  runway=through_reset  -> eligible
+  candidate: codex:gpt-5  provider=codex  scope=all_models  remaining=31%  spendPriority=-0.1649  runway=projected_exhaustion  -> eligible
+  profile: --harness 'cursor' --model 'cursor-grok-4.6-medium'
+stderr=
+curl_called=no
+
+=== Adversarial low chosen-mass confidence ===
+exit=0
+dispatch-resolve:
+  status: ambiguous
+  model: typesafe-ai/jev   latency_ms: 0   tokens: 100/20
+  rule: rule_2 (Current events or live web research.)   confidence: 0.3
+  probabilities: rule_1=0.65 rule_2=0.3 rule_3=0.02 rule_4=0.02 default=0.01
+  reason: confidence 0.3 below floor 0.6
+  candidate: grok:grok-4  provider=grok  -> eligible, unranked: provider grok not in the quota snapshot: disclosed uncertainty
+stderr=
+curl_called=no
