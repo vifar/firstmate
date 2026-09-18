@@ -16,21 +16,11 @@
  */
 import { experimental_evaluate as evaluate } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
+import { resolveRuleConfidence } from './confidence.mjs';
 
 function fail(message, code = 1) {
   process.stderr.write(`dispatch-jev: ${message}\n`);
   process.exit(code);
-}
-
-function maxProbability(probabilities) {
-  if (!probabilities || typeof probabilities !== 'object') return null;
-  let max = null;
-  for (const value of Object.values(probabilities)) {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      if (max == null || value > max) max = value;
-    }
-  }
-  return max;
 }
 
 function readStdin() {
@@ -97,15 +87,7 @@ if (!probabilities) {
   fail('evaluation result missing answers.rule.probabilities');
 }
 
-const metaConfidence = result?.providerMetadata?.typesafe?.confidence;
-let confidence = null;
-if (metaConfidence && typeof metaConfidence === 'object' && typeof metaConfidence.rule === 'number') {
-  confidence = metaConfidence.rule;
-} else if (typeof metaConfidence === 'number') {
-  confidence = metaConfidence;
-} else {
-  confidence = maxProbability(probabilities);
-}
+const confidence = resolveRuleConfidence(answer, result?.providerMetadata);
 if (typeof confidence !== 'number' || !Number.isFinite(confidence)) {
   fail('could not resolve answers.rule.confidence');
 }
