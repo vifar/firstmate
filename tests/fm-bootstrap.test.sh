@@ -136,7 +136,8 @@ add_real_jq() {
   cat > "$fakebin/jq" <<SH
 #!/usr/bin/env bash
 if [ -n "\${FM_TEST_CHILD_ENV_LOG:-}" ]; then
-  if [ -n "\${TYPESAFE_API_KEY+x}" ] || [ -n "\${TYPESAFE_API_KEY_PRIVATE+x}" ]; then
+  if [ -n "\${TYPESAFE_API_KEY+x}" ] || [ -n "\${TYPESAFE_API_KEY_PRIVATE+x}" ] || \
+     [ -n "\${AI_GATEWAY_API_KEY+x}" ] || [ -n "\${AI_GATEWAY_API_KEY_PRIVATE+x}" ]; then
     printf 'secret-present\n' >> "\$FM_TEST_CHILD_ENV_LOG"
   else
     printf 'clean\n' >> "\$FM_TEST_CHILD_ENV_LOG"
@@ -1245,7 +1246,6 @@ ROWS
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
   [ -z "$out" ] || fail "typed resolution should add verified Gemini crewmate routing, got: $out"
-
   rm -f "$case_dir/home/.env"
   : > "$case_dir/child-env.log"
   out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
@@ -1255,6 +1255,15 @@ ROWS
   child_env=$(cat "$case_dir/child-env.log")
   [ -n "$child_env" ] || fail "bootstrap child environment probe did not run"
   assert_not_contains "$child_env" 'secret-present' "bootstrap children never inherit the typesafe key"
+
+  : > "$case_dir/child-env.log"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    AI_GATEWAY_API_KEY=gw-test-key FM_TEST_CHILD_ENV_LOG="$case_dir/child-env.log" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 env -u TYPESAFE_API_KEY "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "gateway-key validation should remain silent, got: $out"
+  child_env=$(cat "$case_dir/child-env.log")
+  [ -n "$child_env" ] || fail "bootstrap child environment probe did not run for gateway key"
+  assert_not_contains "$child_env" 'secret-present' "bootstrap children never inherit the gateway key"
   pass "bootstrap gates resolver fields and additive harnesses on the typed key"
 }
 

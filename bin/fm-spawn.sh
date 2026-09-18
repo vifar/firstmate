@@ -2071,10 +2071,13 @@ if [ "$HARNESS" = agy ]; then
 fi
 
 # Typed-dispatch receipt gate (G3/G5) and meta provenance (G4).
-# Armed when FM_TYPED_DISPATCH=require or a typed key is present, and
-# config/crew-dispatch.json exists. Relaunch and secondmate are exempt.
+# Armed when FM_TYPED_DISPATCH=require (or a truthy alias) or a typed key is
+# present, and config/crew-dispatch.json exists. FM_TYPED_DISPATCH=off (or a
+# falsey alias) disarms even when a key is present. Relaunch and secondmate
+# are exempt.
 fm_typed_dispatch_armed() {
   case "${FM_TYPED_DISPATCH:-}" in
+  off | 0 | false | no) return 1 ;;
   require | 1 | true | yes) return 0 ;;
   esac
   local key=${TYPESAFE_API_KEY:-}
@@ -2126,7 +2129,8 @@ validate_dispatch_receipt_for_spawn() {
   ' "$receipt")
   [ -n "$status" ] || status=$(awk '/^  status:/{print $2; exit}' "$receipt")
   DISPATCH_META_STATUS=${status:-unknown}
-  DISPATCH_META_RULE=$(awk '/^  rule:/{sub(/^  rule: /,""); print; exit}' "$receipt")
+  # Resolve emits "rule: <id> (<when>)   confidence: <n>" on one line; keep the id only.
+  DISPATCH_META_RULE=$(awk '/^  rule:/{print $2; exit}' "$receipt")
   DISPATCH_META_CONFIDENCE=$(awk '/confidence:/{
     for (i=1;i<=NF;i++) if ($i ~ /^confidence:/) { print $(i+1); exit }
     if ($1 == "confidence:") { print $2; exit }
@@ -2149,8 +2153,9 @@ validate_dispatch_receipt_for_spawn() {
       exit 1
     }
     want_h= want_m= want_e=
+    # Receipt profile lines are jq @sh-quoted (same contract as resolve tests).
     # shellcheck disable=SC2086
-    set -- $profile_line
+    eval "set -- $profile_line"
     while [ $# -gt 0 ]; do
       case "$1" in
       --harness) want_h=$2; shift 2 ;;

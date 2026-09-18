@@ -11,6 +11,8 @@
 #                 "BACKEND_INVALID: <name> (known: <names>)",
 #                 "STARTUP_MEMORY_BUDGET: invalid config/startup-memory-budget - <reason>",
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
+#                 "CREW_DISPATCH: weak rules - typed resolve cannot discriminate (<reason>)",
+#                 "TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)",
 #                 "FLEET_SYNC: <repo>: skipped|recovered|STUCK: <detail>",
 #                 "HOME_SUMMARY: <ledger never published|not republished since
 #                 <stamp>>; <n> failed attempt(s) ... last: <recorded failure>",
@@ -159,6 +161,9 @@ set -u
 TYPESAFE_API_KEY_PRIVATE=${TYPESAFE_API_KEY:-}
 export -n TYPESAFE_API_KEY_PRIVATE 2>/dev/null || true
 unset TYPESAFE_API_KEY
+AI_GATEWAY_API_KEY_PRIVATE=${AI_GATEWAY_API_KEY:-}
+export -n AI_GATEWAY_API_KEY_PRIVATE 2>/dev/null || true
+unset AI_GATEWAY_API_KEY
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
@@ -1123,8 +1128,8 @@ crew_dispatch_validate() {
   fi
   typed_key=$TYPESAFE_API_KEY_PRIVATE
   [ -n "$typed_key" ] || typed_key=$(fmx_env_get TYPESAFE_API_KEY "$FM_HOME/.env")
+  [ -n "$typed_key" ] || typed_key=$AI_GATEWAY_API_KEY_PRIVATE
   [ -n "$typed_key" ] || typed_key=$(fmx_env_get AI_GATEWAY_API_KEY "$FM_HOME/.env")
-  [ -n "$typed_key" ] || typed_key=${AI_GATEWAY_API_KEY:-}
   [ -z "$typed_key" ] || typed_active=true
   if $typed_active; then
     verified_harnesses=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')

@@ -41,7 +41,7 @@
 #     reason: <why the status is not clear>
 #     candidate: <harness>:<model> provider=.. scope=.. remaining=..% spendPriority=.. runway=.. -> eligible | eligible, unranked: <reason> | not eligible: <reason>
 #     profile: --harness <h> [--model <m>] [--effort <e>]     (status clear only)
-#   clear     -> pass the profile line to fm-spawn.sh unless you state a reason to override
+#   clear     -> write full stdout to data/<id>/dispatch-resolve and pass the profile line to fm-spawn.sh unless data/<id>/dispatch-override.md states a one-line reason
 #   ambiguous -> confidence below the floor; decide as today from the probabilities
 #   escalate  -> the rule requires captain approval, no candidate is rankable, or a genuine tie
 #   error     -> API, network, response, or quota-axi failure; decide as today
@@ -53,6 +53,7 @@
 # Environment:
 #   TYPESAFE_API_KEY and AI_GATEWAY_API_KEY are the resolver-specific settings.
 #   FM_DISPATCH_JEV_GATEWAY overrides the Gateway helper path (tests).
+#   FM_TYPED_DISPATCH is owned by fm-spawn.sh's receipt gate, not this resolver.
 #
 # Authority: this tool never replaces firstmate's judgment, quota-array-dispatch,
 #   the captain-approval gate, or fm-spawn.sh validation; it publishes one

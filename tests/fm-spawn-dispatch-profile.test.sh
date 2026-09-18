@@ -1425,8 +1425,7 @@ write_dispatch_receipt() {  # <home> <id> <status> [profile-line]
   {
     echo "dispatch-resolve:"
     echo "  status: $status"
-    echo "  rule: rule_1 (mechanical)"
-    echo "  confidence: 0.91"
+    echo "  rule: rule_1 (mechanical)   confidence: 0.91"
     [ -z "$profile" ] || echo "  profile: $profile"
   } > "$home/data/$id/dispatch-resolve"
 }
@@ -1457,13 +1456,15 @@ test_typed_dispatch_clear_match_allows_and_records_meta() {
   rec=$(make_spawn_case receipt-match claude "$id")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
-  write_dispatch_receipt "$HOME_DIR" "$id" clear '--harness claude --model sonnet --effort medium'
+  # Real resolve receipts use jq @sh quoting on profile values.
+  write_dispatch_receipt "$HOME_DIR" "$id" clear "--harness 'claude' --model 'sonnet' --effort 'medium'"
   out=$(FM_TYPED_DISPATCH=require run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id" "$PROJ_DIR" --harness claude --model sonnet --effort medium)
   status=$?
   expect_code 0 "$status" "matching clear receipt should spawn: $out"
   assert_grep "dispatch_status=clear" "$HOME_DIR/state/$id.meta" "meta missing dispatch_status=clear"
   assert_grep "dispatch_source=receipt" "$HOME_DIR/state/$id.meta" "meta missing dispatch_source=receipt"
+  assert_grep "dispatch_rule=rule_1" "$HOME_DIR/state/$id.meta" "meta should keep rule id only"
   pass "clear matching receipt allows spawn and records provenance"
 }
 
@@ -1473,7 +1474,7 @@ test_typed_dispatch_clear_mismatch_refuses_without_override() {
   rec=$(make_spawn_case receipt-mismatch claude "$id")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
-  write_dispatch_receipt "$HOME_DIR" "$id" clear '--harness claude --model sonnet --effort medium'
+  write_dispatch_receipt "$HOME_DIR" "$id" clear "--harness 'claude' --model 'sonnet' --effort 'medium'"
   out=$(FM_TYPED_DISPATCH=require run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id" "$PROJ_DIR" --harness claude --model opus --effort high)
   status=$?
@@ -1488,7 +1489,7 @@ test_typed_dispatch_override_allows_mismatch() {
   rec=$(make_spawn_case receipt-override claude "$id")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
-  write_dispatch_receipt "$HOME_DIR" "$id" clear '--harness claude --model sonnet --effort medium'
+  write_dispatch_receipt "$HOME_DIR" "$id" clear "--harness 'claude' --model 'sonnet' --effort 'medium'"
   write_dispatch_override "$HOME_DIR" "$id" 'captain asked for opus on this one'
   out=$(FM_TYPED_DISPATCH=require run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id" "$PROJ_DIR" --harness claude --model opus --effort high)
@@ -1497,6 +1498,21 @@ test_typed_dispatch_override_allows_mismatch() {
   assert_grep "dispatch_source=override" "$HOME_DIR/state/$id.meta" "meta missing dispatch_source=override"
   assert_grep "dispatch_override=captain asked for opus on this one" "$HOME_DIR/state/$id.meta" "meta missing override reason"
   pass "override file allows clear profile mismatch"
+}
+
+test_typed_dispatch_off_disarms_despite_key() {
+  local rec id out status
+  id=receipt-off-z95
+  rec=$(make_spawn_case receipt-off claude "$id")
+  read_case_record "$rec"
+  enable_dispatch_profile "$HOME_DIR"
+  # Armed by key would refuse without a receipt; off must disarm that gate.
+  out=$(FM_TYPED_DISPATCH=off TYPESAFE_API_KEY=test-key run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness claude --model sonnet --effort medium)
+  status=$?
+  expect_code 0 "$status" "FM_TYPED_DISPATCH=off should spawn without receipt: $out"
+  assert_no_grep "dispatch_status=" "$HOME_DIR/state/$id.meta" "disarmed spawn must not write dispatch provenance"
+  pass "FM_TYPED_DISPATCH=off disarms receipt gate even when a typed key is present"
 }
 
 
@@ -1551,5 +1567,6 @@ test_typed_dispatch_receipt_required_when_armed
 test_typed_dispatch_clear_match_allows_and_records_meta
 test_typed_dispatch_clear_mismatch_refuses_without_override
 test_typed_dispatch_override_allows_mismatch
+test_typed_dispatch_off_disarms_despite_key
 
 echo "# all fm-spawn-dispatch-profile tests passed"
