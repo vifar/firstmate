@@ -126,18 +126,27 @@ test_stale_pane_transient_persistent_resume() {
   fakebin="$dir/fakebin"
   win="sess:fm-stale-w2"
   key=$(printf '%s' "stale-w2" | tr ':/.' '___')
+  make_fake_crew_state "$fakebin" >/dev/null
+  printf 'window=%s\nkind=ship\n' "$win" > "$state/stale-w2.meta"
   printf 'working: compiling\n' > "$state/stale-w2.status"
 
-  # Transient: first stale observation self-handles and records a marker.
+  # Transient: first stale observation of a recorded working crew self-handles
+  # and records a marker. Unidentified panes escalate instead (see classify_stale).
+  FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh"
+  FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+  export FM_CREW_STATE_BIN FM_FAKE_CREW_STATE
   stale_marker_record "$win" "$state"
   case "$(FM_STATE_OVERRIDE="$state" classify_stale "$win" "$state")" in
     self\|*) : ;;
     *) fail "transient stale did not self-handle" ;;
   esac
   [ -e "$state/.subsuper-stale-$key" ] || fail "transient stale did not record a persistence marker"
+  unset FM_CREW_STATE_BIN FM_FAKE_CREW_STATE
 
   # Persistent: the marker ages past the threshold and the pane is still idle, so
-  # housekeeping escalates exactly once and clears the marker.
+  # housekeeping escalates exactly once and clears the marker. Drop metadata so
+  # this path also proves missing task metadata does not leak a raw read error.
+  rm -f "$state/stale-w2.meta"
   printf 'idle prompt $\n' > "$dir/pane.txt"
   echo $(( $(date +%s) - 500 )) > "$state/.subsuper-stale-$key"
   : > "$state/.subsuper-escalations" 2>/dev/null || true
