@@ -1123,6 +1123,8 @@ crew_dispatch_validate() {
   fi
   typed_key=$TYPESAFE_API_KEY_PRIVATE
   [ -n "$typed_key" ] || typed_key=$(fmx_env_get TYPESAFE_API_KEY "$FM_HOME/.env")
+  [ -n "$typed_key" ] || typed_key=$(fmx_env_get AI_GATEWAY_API_KEY "$FM_HOME/.env")
+  [ -n "$typed_key" ] || typed_key=${AI_GATEWAY_API_KEY:-}
   [ -z "$typed_key" ] || typed_active=true
   if $typed_active; then
     verified_harnesses=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -1221,6 +1223,24 @@ crew_dispatch_validate() {
   if [ -n "$err" ]; then
     echo "CREW_DISPATCH: invalid config/crew-dispatch.json - $err"
     return 0
+  fi
+  # G1: dispatch file present but typed resolution unarmed.
+  if ! $typed_active; then
+    echo "TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)"
+  fi
+  # G2: fewer than two rules, or a single catch-all when, cannot discriminate.
+  weak=$(jq -r '
+    def catch_all:
+      (. | ascii_downcase | test("any (crewmate|scout)|any crewmate or scout|any task"));
+    (.rules // []) as $r
+    | if ($r | length) == 0 then "empty rules array"
+      elif ($r | length) == 1 and ($r[0].when | catch_all) then "single catch-all when"
+      elif ($r | length) < 2 then "only \($r | length) rule(s)"
+      else empty
+      end
+  ' "$file" 2>/dev/null || true)
+  if [ -n "$weak" ]; then
+    echo "CREW_DISPATCH: weak rules - typed resolve cannot discriminate ($weak)"
   fi
   if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ]; then
     jq -r '
