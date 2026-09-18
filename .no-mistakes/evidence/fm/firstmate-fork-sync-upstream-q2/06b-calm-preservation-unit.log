@@ -1,0 +1,9 @@
+ok symlink-shared linked=true target=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2SB6PX966GD27VZC39331EM/.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts claude=/Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M2SB6PX966GD27VZC39331EM/.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts
+ok threshold 240
+ok pi-long 
+ok pi-short 
+ok pi-multi 
+ok claude-long 
+ok claude-short 
+ok claude-multi 
+ok same-impl 

@@ -1,0 +1,45 @@
+FM_TEST_BEGIN 2026-09-18T04:18:51Z tests/fm-calm-claude-mod.test.sh family=pure-contract-unit expected_gate_skip=none
+FM_TEST_BEGIN 2026-09-18T04:18:51Z tests/fm-calm-pi-extension.test.sh family=pure-contract-unit expected_gate_skip=none
+tests/fm-calm-claude-mod.test.sh: line 48: import { readFileSync, readdirSync, existsSync } from "node:fs";
+const mod = ${MOD@Q};
+const manifest = JSON.parse(readFileSync(\`\${mod}/.claude-plugin/plugin.json\`, "utf8"));
+if (manifest.name !== "firstmate-calm") throw new Error(\`manifest name \${manifest.name}\`);
+for (const key of ["commands", "agents", "skills", "hooks", "mcpServers", "lspServers", "outputStyles"]) {
+  if (key in manifest) throw new Error(\`manifest declares \${key}, which would load while the flag is off\`);
+}
+const hooks = JSON.parse(readFileSync(\`\${mod}/hooks/hooks.json\`, "utf8"));
+const keys = Object.keys(hooks).sort();
+if (JSON.stringify(keys) !== JSON.stringify(["description", "modules"])) {
+  throw new Error(\`hooks.json declares \${keys.join(", ")}: a classic hook would run while the flag is off\`);
+}
+if (JSON.stringify(hooks.modules) !== JSON.stringify(["./register.ts"])) throw new Error("hooks.json names a different module");
+if (!existsSync(\`\${mod}/hooks/register.ts\`)) throw new Error("the hooks module is missing");
+const entries = readdirSync(mod).filter((name) => name !== ".claude-plugin").sort();
+if (JSON.stringify(entries) !== JSON.stringify(["hooks", "lib", "tests"])) {
+  throw new Error(\`the mod folder holds \${entries.join(", ")}: only hooks, lib, and tests may exist\`);
+}
+console.log("shape-ok");
+: bad substitution
+not ok - plugin shape check did not complete (missing: 'shape-ok')
+--- output ---
+
+FM_TEST_END 2026-09-18T04:18:51Z tests/fm-calm-claude-mod.test.sh exit=1 duration_ms=261 gate_skip=false
+skip: installed @earendil-works/pi-coding-agent package not found
+ok - Pi calm compatibility evidence never rejects a Pi version for being newer than 0.82.0, and still fails closed on a missing or malformed version
+skip: installed @earendil-works/pi-coding-agent package not found
+ok - missing Pi presentation class exports reach the independent adapter degradation path
+skip: installed @earendil-works/pi-coding-agent package not found
+skip: installed @earendil-works/pi-coding-agent package not found
+skip: installed @earendil-works/pi-coding-agent package not found
+skip: installed @earendil-works/pi-coding-agent package not found
+skip: pi or tmux not found for Pi operational follow-up E2E
+skip: pi or tmux not found for Pi Calm hidden-block geometry E2E
+skip: installed @earendil-works/pi-coding-agent package not found
+ok - the rendered-export-DOM guard renders in one pass, retries a bounded number of Chrome start-up failures, and reports the Chrome binary, Chrome version, Pi version, exit status, and Chrome diagnostic when every attempt fails
+skip: pi or tmux not found for Pi calm interactive E2E
+fm-test-run: gate skip: tests/fm-calm-pi-extension.test.sh: installed @earendil-works/pi-coding-agent package not found
+FM_TEST_END 2026-09-18T04:18:54Z tests/fm-calm-pi-extension.test.sh exit=0 duration_ms=3702 gate_skip=true
+FM_TEST_SUMMARY total=2 failed=1 skipped_gate=1 duration_ms=3960
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=3963 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-calm-pi-extension.test.sh duration_ms=3702
+FM_TEST_SLOWEST rank=2 script=tests/fm-calm-claude-mod.test.sh duration_ms=261
