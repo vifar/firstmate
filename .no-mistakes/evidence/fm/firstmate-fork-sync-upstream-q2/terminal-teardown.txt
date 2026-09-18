@@ -1,0 +1,1 @@
+ok - check retries recorded terminal teardown and keeps catch-up gated until success

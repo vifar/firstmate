@@ -1,0 +1,2 @@
+ok - a recorded integration base refreshes the pooled worktree from its fetched remote tip
+ok - a recorded base that exists only locally refuses the pooled worktree

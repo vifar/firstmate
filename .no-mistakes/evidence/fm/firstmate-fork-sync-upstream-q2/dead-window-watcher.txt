@@ -1,0 +1,1 @@
+ok - watcher retires dead-window records and preserves live-window records

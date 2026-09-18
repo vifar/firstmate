@@ -1,0 +1,28 @@
+pi-preservation-symlink: ../../../.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts
+same-realpath: true
+ok - Claude CALM_PRESERVE_MIN_CHARS is 240
+ok - Pi CALM_PRESERVE_MIN_CHARS is 240
+ok - presentation re-exports CALM_PRESERVE_MIN_CHARS=240
+ok - shared calmTextIsSubstantive: 239-char single line is working note
+ok - Pi calmTextIsSubstantive: 239-char single line is working note
+ok - Claude stepTextIsWorkingNote inverse: 239-char single line is working note
+ok - shared calmTextIsSubstantive: 240-char single line is preserved
+ok - Pi calmTextIsSubstantive: 240-char single line is preserved
+ok - Claude stepTextIsWorkingNote inverse: 240-char single line is preserved
+ok - shared calmTextIsSubstantive: multi-line mid-turn text is preserved
+ok - Pi calmTextIsSubstantive: multi-line mid-turn text is preserved
+ok - Claude stepTextIsWorkingNote inverse: multi-line mid-turn text is preserved
+ok - shared calmTextIsSubstantive: short single-line note is hidden
+ok - Pi calmTextIsSubstantive: short single-line note is hidden
+ok - Claude stepTextIsWorkingNote inverse: short single-line note is hidden
+ok - tool_use short note
+ok - tool_use multi-line preserved
+ok - tool_use threshold preserved
+ok - tool_use below-threshold hidden
+ok - max_tokens with tools hides short note
+ok - max_tokens without tools keeps short text
+ok - end_turn never treated as working note
+ok - restored transcript keeps below-threshold as working note
+ok - restored transcript preserves multi-line as final reply
+ok - restored transcript preserves threshold reply
+preservation-suite-ok
