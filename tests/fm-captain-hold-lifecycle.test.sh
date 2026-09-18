@@ -2623,7 +2623,6 @@ test_reconcile_retires_a_moot_calls_prompt_and_keeps_an_active_one() {
   assert_contains "$show" "held: yes" "the still-active call was released by its re-check note"
   pass "a moot call's prompt is retired on the evidence, and an active call keeps the question it still owes"
 }
-test_reconcile_retires_a_moot_calls_prompt_and_keeps_an_active_one
 
 # The other half of the same lifecycle: cleanup and the bounded sweep. Cleanup
 # must retire a spent record with the row it closes, and must NOT retire one
@@ -2687,7 +2686,6 @@ test_escalation_retirement_survives_cleanup_and_the_sweep() {
   assert_contains "$show" "state: done" "the recorded answer did not close the captain call"
   pass "cleanup keeps a live call's prompt and drops a settled one, and the sweep reaps only departed records"
 }
-test_escalation_retirement_survives_cleanup_and_the_sweep
 
 # The originating work item is itself the captain call, which is what the policy
 # prefers ("hold the work item the question gates"). Cleanup of that finished
@@ -4198,6 +4196,8 @@ test_origin_slug_validation_precedes_path_construction
 test_status_resolution_over_an_open_hold_is_signalled
 test_legitimate_holds_produce_no_divergence_signal
 test_escalation_record_lives_exactly_as_long_as_its_call
+test_reconcile_retires_a_moot_calls_prompt_and_keeps_an_active_one
+test_escalation_retirement_survives_cleanup_and_the_sweep
 test_teardown_never_closes_a_captain_held_task
 test_retained_row_artifacts_survive_captain_answers
 test_interrupted_cleanup_keeps_the_captain_call_recoverable
