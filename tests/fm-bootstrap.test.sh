@@ -1104,6 +1104,31 @@ test_crew_dispatch_active_rules_are_verbose_bootstrap_info() {
   pass "bootstrap surfaces active crew-dispatch rules only as verbose BOOTSTRAP_INFO"
 }
 
+
+test_typed_dispatch_bootstrap_diagnostics() {
+  local case_dir fakebin out
+  case_dir="$TMP_ROOT/typed-dispatch-diag"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  # G1: file present, no key
+  printf '%s\n' '{"rules":[{"when":"narrow ship work","use":{"harness":"codex"}}],"default":{"harness":"codex"}}' \
+    > "$case_dir/home/config/crew-dispatch.json"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  add_real_jq "$fakebin"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 env -u TYPESAFE_API_KEY -u AI_GATEWAY_API_KEY "$ROOT/bin/fm-bootstrap.sh")
+  printf '%s\n' "$out" | grep -F 'TYPED_DISPATCH: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY missing while config/crew-dispatch.json exists)' >/dev/null \
+    || fail "G1 missing: $out"
+  # G2: single catch-all
+  printf '%s\n' '{"rules":[{"when":"any crewmate or scout task","use":{"harness":"codex"}}],"default":{"harness":"codex"}}' \
+    > "$case_dir/home/config/crew-dispatch.json"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 env -u TYPESAFE_API_KEY -u AI_GATEWAY_API_KEY "$ROOT/bin/fm-bootstrap.sh")
+  printf '%s\n' "$out" | grep -F 'CREW_DISPATCH: weak rules - typed resolve cannot discriminate (single catch-all when)' >/dev/null \
+    || fail "G2 missing: $out"
+  pass "bootstrap emits typed-dispatch G1 and weak-rules G2 diagnostics"
+}
+
 test_crew_dispatch_validation() {
   local label body expect mode case_dir fakebin out child_env n
   n=0
@@ -1260,4 +1285,5 @@ test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once
 test_crew_dispatch_active_rules_are_verbose_bootstrap_info
+test_typed_dispatch_bootstrap_diagnostics
 test_crew_dispatch_validation

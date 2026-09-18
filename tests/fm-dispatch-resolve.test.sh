@@ -189,7 +189,7 @@ write_response "$RESPONSE" rule_4 0.9
 run code out err "$BRIEF" --project pager
 expect_code 0 "$code" "absent key exits 0"
 assert_equals '' "$out" "absent key prints nothing on stdout"
-assert_contains "$err" 'dispatch-resolve: off (TYPESAFE_API_KEY absent from the environment and' "absent key explains itself on stderr"
+assert_contains "$err" 'dispatch-resolve: off (TYPESAFE_API_KEY and AI_GATEWAY_API_KEY absent from the environment and' "absent key explains itself on stderr"
 assert_absent "$LOG/argv" "absent key never calls curl"
 assert_absent "$LOG/quota-axi.calls" "absent key never reads quota-axi"
 pass "absent key is off: one stderr line, exit 0, no network call"
@@ -634,5 +634,45 @@ run code out err --help
 expect_code 0 "$code" "--help exits 0"
 assert_contains "$out" 'Usage:' "--help prints usage"
 pass "configuration errors exit 2 before any network call"
+
+
+
+# Gateway transport: stub helper via FM_DISPATCH_JEV_GATEWAY, no TypeSafe key.
+GATEWAY_STUB="$TMP_ROOT/fake-gateway.mjs"
+cat > "$GATEWAY_STUB" <<'JS'
+#!/usr/bin/env node
+import { readFileSync, writeFileSync } from 'node:fs';
+const raw = readFileSync(0, 'utf8');
+const req = JSON.parse(raw);
+if (!req.state || !req.questions?.rule) {
+  console.error('bad request');
+  process.exit(1);
+}
+if (!process.env.AI_GATEWAY_API_KEY) {
+  console.error('missing AI_GATEWAY_API_KEY');
+  process.exit(1);
+}
+const choices = Object.keys(req.questions.rule.criteria || {}).sort();
+const probabilities = Object.fromEntries(choices.map((k) => [k, k === 'rule_4' ? 0.96 : 0.01]));
+// normalize tiny drift
+const sum = Object.values(probabilities).reduce((a, b) => a + b, 0);
+for (const k of Object.keys(probabilities)) probabilities[k] = probabilities[k] / sum;
+process.stdout.write(JSON.stringify({
+  model: 'typesafe-ai/jev',
+  answers: { rule: { type: 'choice', choice: 'rule_4', confidence: 0.91, probabilities } },
+  usage: { input_tokens: 100, output_tokens: 20 },
+}));
+JS
+chmod +x "$GATEWAY_STUB"
+unset TYPESAFE_API_KEY
+AI_GATEWAY_API_KEY=gw-test-key FM_DISPATCH_JEV_GATEWAY="$GATEWAY_STUB" \
+  PATH="$FAKEBIN:$BASE_PATH" FM_HOME="$HOME_DIR" FM_ROOT_OVERRIDE="$ROOT" \
+  run code out err "$BRIEF"
+expect_code 0 "$code" "gateway stub path exits 0"
+assert_contains "$out" 'status: clear' "gateway stub yields clear when rule_4 wins"
+assert_contains "$out" 'profile:' "gateway stub clear emits profile"
+assert_absent "$LOG/argv" "gateway path never calls curl"
+pass "gateway transport reaches clear via FM_DISPATCH_JEV_GATEWAY stub"
+
 
 printf '# all fm-dispatch-resolve tests passed\n'
