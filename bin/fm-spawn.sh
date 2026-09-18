@@ -2152,7 +2152,9 @@ validate_dispatch_receipt_for_spawn() {
       echo "error: data/$ID/dispatch-resolve status is clear but has no profile: line; re-run bin/fm-dispatch-resolve.sh or write data/$ID/dispatch-override.md" >&2
       exit 1
     }
-    want_h= want_m= want_e=
+    want_h=
+    want_m=
+    want_e=
     # Receipt profile lines are jq @sh-quoted (same contract as resolve tests).
     # shellcheck disable=SC2086
     eval "set -- $profile_line"
@@ -2185,7 +2187,7 @@ validate_dispatch_receipt_for_spawn() {
   esac
 }
 
-validate_dispatch_receipt_for_spawn
+validate_dispatch_receipt_for_spawn "$@"
 
 secondmate_registry_value() {
   secondmate_registry_field "$DATA/secondmates.md" "$1" "$2"
