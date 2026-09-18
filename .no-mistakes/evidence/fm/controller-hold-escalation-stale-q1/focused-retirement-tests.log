@@ -1,0 +1,4 @@
+ok - an escalation record is retired exactly when its call settles, never while the captain still owes an answer
+ok - a moot call's prompt is retired on the evidence, and an active call keeps the question it still owes
+ok - cleanup keeps a live call's prompt and drops a settled one, and the sweep reaps only departed records
+ALL_FOCUSED_RETIREMENT_TESTS_PASSED
