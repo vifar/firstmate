@@ -677,8 +677,16 @@ await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: s
 const afterConsume = readHandoff();
 if (afterConsume.length !== 31) throw new Error(`a consumed record must leave the store, saw ${afterConsume.length} records`);
 if (seqOf(afterConsume).includes(108)) throw new Error("the consumed record rode the store again");
+const sentBeforeRestart = sent.length;
 await handlers.get("session_shutdown")({}, {});
-if (readHandoff().length !== 31) throw new Error("a shutdown must persist only the bounded pending records");
+await handlers.get("session_start")({ type: "session_start" }, {});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const restarted = sent.slice(sentBeforeRestart).map((wake) => wake.m);
+if (restarted.some((message) => message.includes("handoff-case-108"))) {
+  throw new Error(`a consumed close was re-delivered after restart: ${restarted.join(" | ")}`);
+}
+if (readHandoff().length !== 31) throw new Error("restart must preserve only the bounded pending records");
+await handlers.get("session_shutdown")({}, {});
 // A store holding nothing but records that can no longer be the pending close
 // they were written for must clear itself and replay nothing.
 writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: [record(7200000, 500), record(3600000, 501)] })}\n`);
@@ -1109,6 +1117,200 @@ EOF
   pass ".omp watch extension: an ordinary non-replacement close is liveness-checked too, and live work still delivers"
 }
 
+# The retained list is bounded by age, not only by live work. An undelivered
+# close that has outlived its replacement window must be retired rather than
+# re-delivered when a later close runs the same pipeline: the live replays named
+# panes that had since been reused by other tasks, so their work still existed
+# and a liveness-only predicate passed them - the age bound is what rejects
+# them. The fresh close alongside it proves the bound does not suppress real
+# work.
+test_watch_extension_retires_aged_retained_close() {
+  local repo home out status
+  repo="$TMP_ROOT/aged/repo"; home="$TMP_ROOT/aged/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The first arm child reports one close and exits; a successor reports the next
+  # one and then stays up, so the only deliveries are those closes.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+if [ ! -e "${FM_HOME:?}/state/.aged-fired" ]; then
+  : > "$FM_HOME/state/.aged-fired"
+  printf 'signal: %s/state/aged-q1.turn-ended\n' "$FM_HOME"
+  exit 0
+fi
+if [ ! -e "${FM_HOME:?}/state/.fresh-fired" ]; then
+  : > "$FM_HOME/state/.fresh-fired"
+  sleep 1
+  printf 'signal: %s/state/fresh-q1.turn-ended\n' "$FM_HOME"
+  exit 0
+fi
+exec sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_OMP_HANDOFF_TTL_MS=200 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { mkdirSync, writeFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+mkdirSync(state, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+// Both closes name live work: the first is held back only because omp rejects
+// its follow-up, which is what leaves it retained in memory to age out.
+for (const id of ["aged-q1", "fresh-q1"]) {
+  writeFileSync(`${state}/${id}.turn-ended`, "turn ended\n");
+  writeFileSync(`${state}/${id}.meta`, "window=default:w1B:p1\nharness=omp\n");
+}
+const handlers = new Map(); const sent = [];
+let rejectAged = true;
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) {
+    // Only the retained aged close follow-up is rejected, so it stays in memory
+    // undelivered. Every other send, including a composed failure notice, takes
+    // its ordinary path and cannot absorb this rejection.
+    if (rejectAged && m.includes("aged-q1.turn-ended")) {
+      rejectAged = false;
+      throw new Error("omp rejected the follow-up");
+    }
+    sent.push({ m, o });
+    return undefined;
+  },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, {});
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 6000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+await waitUntil(() => sent.some((wake) => wake.m.includes("fresh-q1")), "the fresh close");
+if (sent.some((wake) => wake.m.includes("aged-q1"))) {
+  throw new Error(`a close that outlived its replacement window was re-delivered: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+if (sent.filter((wake) => wake.m.includes("fresh-q1")).length !== 1) {
+  throw new Error(`the live close must deliver exactly once: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch aged retained close: $out"
+  [ -z "$out" ] || fail "omp watch aged retained close test printed output: $out"
+  pass ".omp watch extension: a close that outlived its replacement window is retired instead of re-delivered, while live work still delivers"
+}
+
+# A failure notice reports one continuity episode, so it is surfaced exactly
+# once. surfaceFailure sends without a pending close and therefore never reached
+# the consumption or liveness discipline that retires actionable wakes: with the
+# retry counter left exhausted, every later close of the same generation
+# re-composed the identical text, which is what put four byte-identical notices
+# on the captain hours after the watcher was healthy again. Phase A pins that
+# exactly-once behavior on a closed episode; phase B proves the fix does not go
+# further than the defect and silence a genuinely new episode.
+test_watch_extension_reports_failure_once_per_episode() {
+  local repo home out status
+  repo="$TMP_ROOT/failure/repo"; home="$TMP_ROOT/failure/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The arm child reads its mode from a file the test rewrites: "fail" prints the
+  # same failure line every time, so each exhaustion composes byte-identical text,
+  # and "restored" verifies a live watcher and stays up, which is the readiness
+  # proof that ends an episode.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+mode=$(cat "${FM_HOME:?}/state/arm-mode" 2>/dev/null || printf fail)
+if [ "$mode" = restored ]; then
+  printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-2\n' "$$"
+  printf '%s\n' "$$" > "$FM_HOME/state/arm-child.pid"
+  exec sleep 30
+fi
+printf 'watcher: FAILED - arm cycle could not confirm a fresh watcher beacon\n'
+exit 1
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  printf 'fail\n' > "$home/state/arm-mode"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+mkdirSync(state, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); const sent = [];
+let tool = null;
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool(t) { tool = t; },
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 8000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+const exhaustNotices = () => sent.filter((wake) => wake.m.includes("could not restore watcher continuity"));
+await handlers.get("session_start")({ type: "session_start" }, {});
+// Phase A: the retry ladder exhausts against a watcher that never comes up, so
+// the episode reports once.
+await tool.execute();
+await waitUntil(() => exhaustNotices().length >= 1, "the first exhaustion notice");
+if (exhaustNotices().length !== 1) throw new Error(`the episode must report exactly once: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+const episodeNotice = exhaustNotices()[0].m;
+// The counter stays exhausted, so each later failing close belongs to the same,
+// already-answered episode and composes that exact text again. Drive two more
+// repair cycles and demand the notice is not re-surfaced.
+for (let cycle = 0; cycle < 2; cycle += 1) {
+  await tool.execute();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+}
+if (sent.filter((wake) => wake.m === episodeNotice).length !== 1) {
+  throw new Error(`a byte-identical failure notice was re-surfaced: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+if (exhaustNotices().length !== 1) {
+  throw new Error(`one episode emitted ${exhaustNotices().length} notices: ${JSON.stringify(exhaustNotices().map((wake) => wake.m))}`);
+}
+// Phase B: a successor verifiably restores continuity, which clears the closed
+// episode memory. Ending that verified watcher with the failure mode restored
+// is then a genuinely new episode, and it must report again - the fix must not
+// go past the defect and silence real failures. The composed text legitimately
+// differs (this close is a killed successor rather than a failed start), so this
+// asserts the second report exists rather than matching the first byte for byte.
+writeFileSync(`${state}/arm-mode`, "restored\n");
+await tool.execute();
+await waitUntil(() => {
+  try { return Number(readFileSync(`${state}/arm-child.pid`, "utf8").trim()) > 0; } catch { return false; }
+}, "the restored successor");
+if (exhaustNotices().length !== 1) throw new Error("a verified restoration must not itself report an exhaustion failure");
+writeFileSync(`${state}/arm-mode`, "fail\n");
+process.kill(Number(readFileSync(`${state}/arm-child.pid`, "utf8").trim()), "SIGTERM");
+await waitUntil(() => exhaustNotices().length >= 2, "the fresh episode notice");
+if (exhaustNotices().length !== 2) {
+  throw new Error(`a new episode must report exactly one more notice, saw ${exhaustNotices().length}: ${JSON.stringify(exhaustNotices().map((wake) => wake.m))}`);
+}
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch failure notice: $out"
+  [ -z "$out" ] || fail "omp watch failure notice test printed output: $out"
+  pass ".omp watch extension: a failure notice reports once per episode, and a verified restoration still reports a new one"
+}
+
 test_detection_anchored_name_and_marker_precedence
 test_omp_startup_binds_loaded_markers
 test_omp_markers_record_outer_omp_ancestor
@@ -1125,3 +1327,5 @@ test_watch_extension_arms_and_delivers
 test_watch_extension_bounds_replacement_handoff
 test_watch_extension_gates_close_liveness
 test_watch_extension_gates_non_replacement_delivery
+test_watch_extension_retires_aged_retained_close
+test_watch_extension_reports_failure_once_per_episode

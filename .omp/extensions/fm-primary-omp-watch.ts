@@ -35,9 +35,12 @@
 // stored record is eligible only while it can still be the pending close it was
 // written for: created within 10 minutes, among the newest 32 records, and
 // still naming live runtime state when it carries state references. Every
-// load, merge, and persist path applies these bounds, so the store cannot grow without bound and
-// a session_start can never replay a long tail of closes for work that has
-// already finished - each record is a fresh snapshot of the actionable state,
+// load, merge, persist, and delivery path applies these bounds - the disk store
+// and the in-memory retained list alike, because an extension loaded across a
+// long-lived session otherwise held its records forever and re-delivered a
+// close hours past its window - so neither can grow without bound and neither a
+// session_start nor a later cycle can replay a long tail of closes for work
+// that has already finished - each record is a fresh snapshot of the actionable state,
 // a newer close supersedes an older one, the durable wake queue already keeps
 // the row the watcher reported, and a condition that is still actionable is
 // re-detected by the new session's first watcher cycle. A close whose delivery
@@ -64,6 +67,20 @@
 // in-memory record and re-sent it, once per re-arm, hours after the task and
 // its files were gone. A close that fails the test is finished, not merely
 // skipped, so no later path can resurrect it.
+//
+// Failure notices (stated once here):
+// A failure notice reports one continuity episode, so it is surfaced exactly
+// once per episode. surfaceFailure sends without a pending record, so it never
+// reached the consumption or liveness discipline above and re-emitted the same
+// composed text on any later close of the same generation - an already-answered
+// failure became a permanent false alarm until the session was replaced. The
+// generation therefore remembers the notices it has reported for the current
+// episode, and endFailureEpisode is the single owner of ending that episode: a
+// successor that verifies a live watcher or a healthy actionable delivery clears
+// the memory, so a fresh episode still reports and a closed one stays silent. It
+// resets the bounded retry counter only for a delivered close, never for mere
+// readiness, because clearing it on startup would let a watcher that starts and
+// dies immediately re-arm forever instead of reporting its exhaustion.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -130,6 +147,11 @@ type SessionGeneration = {
   pendingActionables: PendingActionableClose[];
   replacementActionables: Set<string>;
   cleanupFailure: string;
+  // Whether a failure notice has already surfaced during this continuity episode.
+  // surfaceFailure sends without a pending close, so it has no consumption or
+  // liveness state of its own and must suppress every later failure until a
+  // verifiably restored successor ends the episode.
+  failureReported: boolean;
   // Main follow-ups omp has accepted but not yet consumed, by pending token.
   // Never cleared at shutdown: a delivery continuation that runs after the
   // replacement began reads it to tell a main-queued wake (replayed) from a
@@ -157,7 +179,10 @@ const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
 const retryLimit = positiveInteger("FM_WATCH_REARM_RETRY_LIMIT", 5);
 // Replacement-handoff bounds (contract: "Replacement handoff lifetime" above).
-const handoffTtlMs = 600_000;
+// The age bound is the same 10 minutes in production; it is overridable so a
+// regression can drive the bound with real elapsed time instead of waiting one
+// out, exactly as the rearm knobs above are.
+const handoffTtlMs = positiveInteger("FM_OMP_HANDOFF_TTL_MS", 600_000);
 const handoffMaxPending = 32;
 // 35s on Windows so the budget stays above arm's MSYS confirm default (30s in
 // bin/fm-watch-arm.sh): a slow but successful Git Bash cold start must not be
@@ -465,14 +490,23 @@ function handoffWorkIsLive(pending: PendingActionableClose): boolean {
   return false;
 }
 
-// Keeps only records that can still be the pending close they were written for,
-// oldest first (the order a replacement replays them in). The token's middle
+// Whether a record can still be the pending close it was written for: young
+// enough to still be that close, and still naming live work. The token's middle
 // field is the creating process's epoch milliseconds, so a record carries its
-// own age without a second on-disk format.
+// own age without a second on-disk format. This is the single owner of the
+// predicate; the store's bounds and every delivery path apply it, so a record
+// that has aged past its replacement window is retired instead of replayed no
+// matter where it is being held.
+function retainedCloseIsEligible(pending: PendingActionableClose): boolean {
+  if (Date.now() - Number(pending.token.split("-")[1]) > handoffTtlMs) return false;
+  return handoffWorkIsLive(pending);
+}
+
+// Keeps only records that can still be the pending close they were written for,
+// oldest first (the order a replacement replays them in).
 function eligibleHandoff(pending: PendingActionableClose[]): PendingActionableClose[] {
-  const now = Date.now();
   return pending
-    .filter((item) => now - Number(item.token.split("-")[1]) <= handoffTtlMs && handoffWorkIsLive(item))
+    .filter(retainedCloseIsEligible)
     .sort((a, b) => Number(a.token.split("-")[1]) - Number(b.token.split("-")[1]))
     .slice(-handoffMaxPending);
 }
@@ -626,7 +660,7 @@ function createGeneration(): SessionGeneration {
     seq: 0,
     pendingActionables: [],
     replacementActionables: new Set(),
-    cleanupFailure: "",
+    failureReported: false,
     unconsumedWakes: new Map(),
     deferredClose: null,
   };
@@ -713,12 +747,13 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement. Watcher continuity is extension-owned.`,
     );
-    // Every delivery of a close is gated on its work still being live, not only
-    // a replacement's replay: an ordinary re-delivery of a finished close is
-    // the same phantom announcement, so the test cannot be scoped to the
-    // replacement set. The record is finished rather than merely skipped, so a
-    // later path cannot resurrect it either.
-    if (pending && !handoffWorkIsLive(pending)) {
+    // Every delivery of a close is gated on its work still being live and its
+    // replacement window not having lapsed, not only a replacement's replay: an
+    // ordinary re-delivery of a finished or long-aged close is the same phantom
+    // announcement, so the test cannot be scoped to the replacement set. The
+    // record is finished rather than merely skipped, so a later path cannot
+    // resurrect it either.
+    if (pending && !retainedCloseIsEligible(pending)) {
       try {
         finishPendingActionable(owner, pending);
       } catch (error) {
@@ -823,6 +858,15 @@ export default function (pi: ExtensionAPI) {
   }
 
   function surfaceFailure(owner: SessionGeneration, message: string): void {
+    // A failure notice reports one continuity episode. surfaceFailure sends
+    // without a pending close, so it never reached the consumption or liveness
+    // discipline that retires actionable wakes: an already-answered failure
+    // re-emitted the same composed text on every later close of the same
+    // generation, indefinitely, and each repeat cost a supervision turn.
+    // Reporting an episode once and clearing on verified restoration makes the
+    // notice exactly-once instead.
+    if (owner.failureReported) return;
+    owner.failureReported = true;
     void sendWake(owner, message).catch(() => {
       // omp owns delivery errors; continuity restoration never waits on prompting.
     });
@@ -903,11 +947,12 @@ export default function (pi: ExtensionAPI) {
           (item) => !item.delivered && !owner.unconsumedWakes.has(item.token),
         );
         if (!pending) break;
-        // A dead replacement record is dropped here, before its restoration.
+        // A dead or aged replacement record is dropped here, before its
+        // restoration, so a doomed record never spins an arm cycle.
         // A dead record on any other path is dropped at the send boundary
         // instead, which runs after this pipeline has restored continuity, so
         // dropping a finished close never leaves supervision unarmed.
-        if (owner.replacementActionables.has(pending.token) && !handoffWorkIsLive(pending)) {
+        if (owner.replacementActionables.has(pending.token) && !retainedCloseIsEligible(pending)) {
           finishPendingActionable(owner, pending);
           continue;
         }
@@ -1029,6 +1074,17 @@ export default function (pi: ExtensionAPI) {
         resolveReady(ready);
       });
     });
+  }
+
+  // The single owner of ending a continuity episode: a verified successor
+  // watcher or a healthy actionable delivery both prove continuity is restored,
+  // so both clear the episode state a later failure would otherwise inherit.
+  // resetRetries is false when continuity was proven only by readiness, because
+  // clearing the bounded retry counter there would let a watcher that starts and
+  // immediately dies re-arm forever instead of reporting its exhaustion.
+  function endFailureEpisode(owner: SessionGeneration, resetRetries: boolean): void {
+    if (resetRetries) owner.retryFailures = 0;
+    owner.failureReported = false;
   }
 
   async function retireArm(armChild: ChildProcess | null): Promise<boolean> {
@@ -1159,6 +1215,12 @@ export default function (pi: ExtensionAPI) {
       if (readinessSettled) return;
       readinessSettled = true;
       verified = ready;
+      // A successor that confirms a live, fresh watcher is a continuity
+      // restoration, so it ends the episode. Retry accounting is deliberately
+      // left alone here: the arm child prints started/attached before it has
+      // proven it will stay up, so clearing the bound would turn a watcher that
+      // starts and immediately dies into a silent, unbounded re-arm loop.
+      if (ready && generationIsLive(owner)) endFailureEpisode(owner, false);
       resolveReadiness(ready);
     };
     const observeEstablishedArm = (): void => {
@@ -1198,7 +1260,11 @@ export default function (pi: ExtensionAPI) {
         const pending = armPendingActionable.get(armChild) ?? createPendingActionable(classification.message, predecessor);
         enqueuePendingActionable(owner, pending);
         if (!generationIsLive(owner)) return;
-        owner.retryFailures = 0;
+        // An actionable close is a healthy delivery, so it ends any continuity
+        // episode exactly as a verified successor does. Unlike readiness alone,
+        // a delivered close has proven the cycle did real work, so the bounded
+        // retry accounting restarts too.
+        endFailureEpisode(owner, true);
         void processPendingActionables(owner);
         return;
       }
