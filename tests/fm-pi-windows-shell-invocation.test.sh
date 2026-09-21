@@ -30,12 +30,13 @@ cat >"$project/bin/fm-arm-pretool-check.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'arm:%s\n' "$*" >> "$FM_WINDOWS_SHELL_LOG"
 SH
-cat >"$project/bin/fm-turnend-guard.sh" <<'SH'
+cat > "$project/bin/fm-turnend-guard.sh" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null
 printf 'turnend:%s\n' "$*" >> "$FM_WINDOWS_SHELL_LOG"
+exit 0
 SH
-cat >"$project/bin/fm-operational-input.sh" <<'SH'
+cat > "$project/bin/fm-operational-input.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'operational:%s\n' "$*" >> "$FM_WINDOWS_SHELL_LOG"
 input=$(cat)
@@ -111,6 +112,7 @@ for (const expected of [
 ]) {
   if (!calls.includes(expected)) throw new Error(`missing ${expected} in:\n${calls}`);
 }
+if (calls.includes("fm-turnend-summary.sh")) throw new Error("Pi turn-end invoked the removed summary path");
 JS
 )
 status=$?

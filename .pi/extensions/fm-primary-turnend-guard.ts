@@ -446,18 +446,6 @@ async function claimSessionstartMessage(
   return sessionstartMessage(generation, result);
 }
 
-function runSummary(): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolveResult) => {
-    const invocation = firstmateShellInvocation(`${root}/bin/fm-turnend-summary.sh`, []);
-    let stdout = "";
-    let stderr = "";
-    const child = spawn(invocation.command, invocation.args, { stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", () => resolveResult({ code: 0, stdout: "", stderr: "" }));
-    child.on("close", (code) => resolveResult({ code: code ?? 0, stdout, stderr }));
-  });
-}
 
 function runGuard(): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
@@ -608,34 +596,22 @@ export default function (pi: ExtensionAPI) {
     return { block: true, reason: result.stderr.trim() || "denied by the watcher-arm PreToolUse seatbelt" };
   });
 
+  // Recovery always wins: an unhealthy watcher compels one guard continuation.
   pi.on("agent_settled", async () => {
     if (guardFollowupActive) {
       guardFollowupActive = false;
       return;
     }
-
     const result = await runGuard();
-    if (result.code === 2) {
-      guardFollowupActive = true;
-      try {
-        const content = encodeFirstmateOperationalInput(
-          "turn-end-guard",
-          "TURN WOULD END BLIND - supervision is off. " +
-            "The watcher cycle is missing, failed, or unhealthy. Follow the harness recovery instruction below before ending the turn.\n\n" +
-            result.stderr,
-        );
-        await pi.sendUserMessage(content, { deliverAs: "followUp" });
-      } catch {
-        guardFollowupActive = false;
-      }
-      return;
-    }
-
-    const summary = await runSummary();
-    if (summary.code !== 0 || !summary.stdout.trim()) return;
+    if (result.code !== 2) return;
     guardFollowupActive = true;
     try {
-      const content = encodeFirstmateOperationalInput("turn-end-summary", summary.stdout);
+      const content = encodeFirstmateOperationalInput(
+        "turn-end-guard",
+        "TURN WOULD END BLIND - supervision is off. " +
+          "The watcher cycle is missing, failed, or unhealthy. Follow the harness recovery instruction below before ending the turn.\n\n" +
+          result.stderr,
+      );
       await pi.sendUserMessage(content, { deliverAs: "followUp" });
     } catch {
       guardFollowupActive = false;

@@ -479,6 +479,7 @@ test_turnend_guard_extension_compels_one_continuation() {
   cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
 #!/usr/bin/env bash
 payload=$(cat); printf '%s\n' "$payload" >> "${FM_GUARD_LOG:?}"
+if [ "${FM_GUARD_HEALTHY:-0}" = 1 ]; then exit 0; fi
 case "$payload" in *'"stop_hook_active":true'*) exit 0 ;; esac
 printf 'guard says: repair with fm_watch_arm_omp\n' >&2; exit 2
 SH
@@ -486,6 +487,8 @@ SH
 #!/usr/bin/env bash
 case "$*" in *fm-watch-arm.sh*'&'*) printf 'fm watcher-arm seatbelt: blocked\n' >&2; exit 2 ;; esac; exit 0
 SH
+  printf "#!/usr/bin/env bash\nprintf summary-invoked >> \"\${FM_SUMMARY_LOG:?}\"\n" > "$repo/bin/fm-turnend-summary.sh"
+  chmod +x "$repo/bin/fm-turnend-summary.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/bin/fm-cd-pretool-check.sh"
   cat > "$repo/bin/fm-sessionstart-run.sh" <<'SH'
 #!/usr/bin/env bash
@@ -493,7 +496,7 @@ printf '%s\n' "${FM_TEST_SESSION_PID:?}" > "${FM_HOME:?}/state/.lock"
 printf 'OMP DIGEST source=%s\n' "$2"
 SH
   chmod +x "$repo/bin/"*.sh
-  out=$(FM_GUARD_LOG="$TMP_ROOT/guard/guard.log" FM_HOME="$home" EXT="$repo/.omp/extensions/fm-primary-turnend-guard.ts" node --input-type=module 2>&1 <<'EOF'
+  out=$(FM_GUARD_LOG="$TMP_ROOT/guard/guard.log" FM_SUMMARY_LOG="$TMP_ROOT/guard/summary.log" FM_GUARD_HEALTHY=0 FM_HOME="$home" EXT="$repo/.omp/extensions/fm-primary-turnend-guard.ts" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
 import { readFileSync, existsSync } from "node:fs";
 process.env.FM_TEST_SESSION_PID = String(process.pid);
@@ -528,16 +531,19 @@ if (!r1.additionalContext.startsWith("⁣FIRSTMATE_OP: v1 turn-end-guard: ")) th
 if (!r1.additionalContext.includes("TURN WOULD END BLIND") || !r1.additionalContext.includes("repair with fm_watch_arm_omp")) throw new Error("continuation dropped the guard text");
 const r2 = await handlers.get("session_stop")({ type: "session_stop", stop_hook_active: true }, {});
 if (r2 !== undefined) throw new Error(`the flagged second stop must stand down, got ${JSON.stringify(r2)}`);
+process.env.FM_GUARD_HEALTHY = "1";
+const r3 = await handlers.get("session_stop")({ type: "session_stop", stop_hook_active: false }, {});
+if (r3 !== undefined) throw new Error(`a healthy normal stop must complete without continuation, got ${JSON.stringify(r3)}`);
 const payloads = readFileSync(process.env.FM_GUARD_LOG, "utf8").trim().split("\n");
-if (payloads.join("|") !== '{"stop_hook_active":false}|{"stop_hook_active":true}') throw new Error(`guard payloads were ${payloads.join("|")}`);
+if (payloads.join("|") !== '{"stop_hook_active":false}|{"stop_hook_active":true}|{"stop_hook_active":false}') throw new Error(`guard payloads were ${payloads.join("|")}`);
+if (existsSync(process.env.FM_SUMMARY_LOG)) throw new Error("normal turn-end invoked the removed worker summary");
 if (!existsSync(`${process.env.FM_HOME}/state/.omp-turnend-extension-loaded`)) throw new Error("loaded marker was not written");
 await handlers.get("session_shutdown")({}, {});
 EOF
 )
   status=$?
   expect_code 0 "$status" "omp turn-end guard extension contract: $out"
-  [ -z "$out" ] || fail "omp guard extension test printed output: $out"
-  pass ".omp turn-end guard: digest delivery, seatbelt block, one compelled continuation, flagged stop stands down"
+  pass ".omp turn-end guard: digest delivery, seatbelt block, one compelled recovery continuation, flagged stop stands down, normal stop skips summary"
 }
 
 test_watch_extension_arms_and_delivers() {

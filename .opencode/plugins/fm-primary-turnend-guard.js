@@ -91,19 +91,7 @@ export const FmPrimaryTurnendGuard = async ({ client, directory, worktree }) => 
         }
         return;
       }
-      try {
-        const summary = await runProcess(`${root}/bin/fm-turnend-summary.sh`, []);
-        if (summary.code === 0 && summary.stdout.trim()) {
-          const text = await encodeFirstmateOperationalInput(root, "turn-end-summary", summary.stdout);
-          await client.session.promptAsync({
-            path: { id: sessionID },
-            body: { parts: [{ type: "text", text }] },
-          });
-          skipNextIdle = true;
-        }
-      } catch {
-        skipNextIdle = false;
-      }
+      return;
     },
   };
 };
