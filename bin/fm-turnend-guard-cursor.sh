@@ -296,7 +296,6 @@ fi
 ARM_OUT=
 ARM_PID=
 ACTIONABLE=0
-HEALTHY=0
 STAND_DOWN=0
 
 # Never leave an arm child or its capture file behind, on any exit path.
