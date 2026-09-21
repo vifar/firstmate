@@ -147,12 +147,6 @@ emit_followup() {  # <kind> <body> [reset-budget]
   exit 0
 }
 
-emit_summary_followup() {
-  local summary
-  summary=$("$SCRIPT_DIR/fm-turnend-summary.sh" 2>/dev/null) || exit 0
-  [ -n "$summary" ] || exit 0
-  emit_followup turn-end-summary "$summary"
-}
 
 budget_read() {
   local session count
@@ -348,7 +342,6 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   # A non-actionable close is benign when another verified watcher already owns
   # this home and is still beating inside the shared grace window.
   if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
-    HEALTHY=1
     break
   fi
   [ "$attempt" -lt "$ARM_ATTEMPTS" ] || break
@@ -371,10 +364,6 @@ $WAKE
 Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This stop hook owns watcher continuity: when the handling turn ends, the next needed cycle parks automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake." reset-budget
 fi
 
-if [ "$HEALTHY" -eq 1 ]; then
-  budget_reset_if_ours
-  emit_summary_followup
-fi
 
 # The park could not establish supervision. Ask the SHARED predicate whether
 # this turn would genuinely end blind, rather than deciding that here a second

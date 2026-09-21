@@ -473,20 +473,6 @@ async function claimSessionstartMessage(
   return sessionstartMessage(generation, result);
 }
 
-// The shared summary is read-only and consumes exactly one fleet snapshot.
-function runSummary(): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolveResult) => {
-    const child = spawn(`${root}/bin/fm-turnend-summary.sh`, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", () => resolveResult({ code: 0, stdout: "", stderr: "" }));
-    child.on("close", (code) => resolveResult({ code: code ?? 0, stdout, stderr }));
-  });
-}
 
 function runGuard(stopHookActive: boolean): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
@@ -619,8 +605,7 @@ export default function (pi: ExtensionAPI) {
     return { block: true, reason: result.stderr.trim() || "denied by the watcher-arm PreToolUse seatbelt" };
   });
 
-  // Recovery always wins. The summary is delivered only after the guard allows
-  // the turn, and stop_hook_active bounds the summary to one continuation.
+  // Recovery always wins: an unhealthy watcher compels one guard continuation.
   pi.on?.("session_stop", async (event) => {
     const stopHookActive = Boolean(event && (event as { stop_hook_active?: unknown }).stop_hook_active === true);
     const result = await runGuard(stopHookActive);
@@ -640,10 +625,6 @@ export default function (pi: ExtensionAPI) {
       }
       return { continue: true, additionalContext: content };
     }
-    if (stopHookActive) return undefined;
-    const summary = await runSummary();
-    if (summary.code !== 0 || !summary.stdout.trim()) return undefined;
-    return { continue: true, additionalContext: encodeFirstmateOperationalInput("turn-end-summary", summary.stdout) };
   });
 
   markLoaded();
