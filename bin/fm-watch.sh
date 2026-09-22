@@ -50,6 +50,11 @@
 #                          the run step cannot show; that deferral still
 #                          re-surfaces once per PAUSE_RESURFACE_SECS, and a pane
 #                          that writes nothing keeps the unchanged schedule.
+#                          A pane whose recorded endpoint holds no agent at all is
+#                          not a wedge and is reported ONCE instead of escalating
+#                          on that cadence forever (wedge_dead_record); only the
+#                          two recovery-grade verdicts license it, and every other
+#                          verdict escalates unchanged.
 #                          A genuinely busy pane
 #                          (window_is_busy true) is exempt from the above, but
 #                          only up to BUSY_TURN_MAX_SECS with no completed turn
@@ -61,10 +66,11 @@
 #                          plain reason once per declaration, while captain-held
 #                          work stays silent until return
 #                          (busy_turn_bound_check owns that split);
-#                          every other pane goes through the same wedge timer and
-#                          surfaces with the identical "stale: ..." reason,
-#                          escalation count, and demand-deep-inspection marker,
-#                          for human inspection only - never an automatic
+#                          every other pane goes through the same wedge timer,
+#                          the dead-record probe above included, and surfaces
+#                          with the identical "stale: ..." reason, escalation
+#                          count, and demand-deep-inspection marker for a live
+#                          agent, for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
 #   stale: <window> (unread firstmate instruction: ...)
@@ -338,8 +344,10 @@ hash_pane() {
 # verdict returns 0: idle, unknown, and dead all return 1, so a converted
 # adapter whose semantic state is missing, malformed, stale, or unverified is
 # treated as not-provably-working and surfaces rather than being absorbed.
-# <tail40> is the same bounded capture already read for hashing and is
-# consumed only by the Grok-scoped fallback inside the contract.
+# <tail40> is the same bounded capture already read for hashing and is passed
+# into the contract's harness-scoped rendered-text checks: the Grok/Rovo/AGY
+# busy fallbacks and the launch-prompt backstop that keeps a launch pinned at
+# its fm-spawn seed from reading as provably working.
 window_is_busy() {  # <window> <tail40>
   local w=$1 tail40=$2 task meta verdict
   task=$(window_to_task "$w" "$STATE")
@@ -1309,10 +1317,17 @@ handle_paused_stale() {  # <window> <task> <hash>
 # the expected external wait. The caller has already confirmed liveness through
 # the busy verdict, so this exception does not suppress undeclared wedges or
 # alter the separate non-busy classification. handle_paused_stale keeps the
-# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS. Away mode
-# remains daemon-owned and receives the undecorated wake identity for its own
-# classification, which is why the declaration is read before the afk branch
-# rather than after it.
+# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS.
+# A pane that declared nothing falls through to the shared wedge timer, which,
+# in a home that armed config/wedge-defer-parked-gate, applies the same rule to
+# the one wait a busy pane cannot declare: a validation gate of its own awaiting
+# a supervisor decision that is still open also takes the bounded recheck rather
+# than the ladder, because who owes that answer does not depend on what the pane
+# is rendering, and the recheck names that supervisor and the action that clears
+# it. An unconfigured home keeps the unchanged ladder there.
+# Away mode remains daemon-owned and receives the undecorated wake identity for
+# its own classification, which is why the declaration is read before the afk
+# branch rather than after it.
 busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file>
   local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared
   statusf="$STATE/$task.status"
@@ -1356,7 +1371,7 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
     handle_paused_stale "$win" "$task" "$h"
     return 0
   fi
-  wedge_timer_check "$win" "$since_file" "busy (no completed turn)" "$escalation_file" "$task"
+  wedge_timer_check "$win" "$since_file" "busy (no completed turn)" "$escalation_file" "$task" "$h"
   return 1
 }
 
@@ -1449,7 +1464,7 @@ pause_state_class() {  # <window> <task>
 # the only record when the worker itself is waiting. It is not the only record
 # there is: once firstmate hands work to the captain, the wait is written into the
 # BACKLOG by bin/fm-captain-hold.sh, and the worker's last line stays whatever it
-# was - routinely `done: PR ...` after a delivery, which no line predicate can
+# was - routinely `done` after a PR delivery, which no line predicate can
 # read as a wait. An alarm bounded only by the line therefore re-fires for the
 # captain's whole thinking time, on exactly the work they already have in hand.
 #
@@ -2723,7 +2738,7 @@ EOF
                 paused)  handle_paused_stale "$w" "$task" "$h" ;;
                 working) clear_pause_state "$key"
                          printf '%s' "$h" > "$sf"
-                         wedge_timer_check "$w" "$ssf" "non-terminal stale (provably working after a declared pause)" "$ewf" "$task"
+                         wedge_timer_check "$w" "$ssf" "non-terminal stale (provably working after a declared pause)" "$ewf" "$task" "$h"
                          triage_log "absorbed non-terminal stale (provably working): $w" ;;
                 *)       handle_paused_stale "$w" "$task" "$h" ;;
               esac

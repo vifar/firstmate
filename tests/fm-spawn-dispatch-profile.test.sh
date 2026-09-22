@@ -382,7 +382,10 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
   assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
   launch=$(cat "$LAUNCH_LOG")
-  [ "$launch" = "custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
+  # The unverified-adapter escape hatch is still an agent this fleet launched,
+  # so it carries the compact-adviser floor; nothing else may rewrite the
+  # captain's own command.
+  [ "$launch" = "export COMPACT_ADVISER_DISABLE=1; custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
   pass "active crew-dispatch profile allows the raw launch-command escape hatch"
 }
 
@@ -884,6 +887,49 @@ test_claude_forwards_firstmate_config_dir_when_set() {
   assert_contains "$launch" "CLAUDE_CONFIG_DIR='$CASE_DIR/claude-work' env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude --dangerously-skip-permissions --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}'" \
     "claude launch did not forward firstmate's CLAUDE_CONFIG_DIR to the crewmate pane"
   pass "claude forwards firstmate's CLAUDE_CONFIG_DIR so the crewmate uses the same credential store"
+}
+
+test_lavish_server_address_is_exported_to_worker_launch() {
+  local rec id out status launch
+  id=profile-lavish-host-z18
+  rec=$(make_spawn_case profile-lavish-host claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '100.99.161.42' > "$HOME_DIR/config/lavish-axi-host"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "a configured Lavish server address should allow the worker spawn"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "export LAVISH_AXI_HOST='100.99.161.42';" \
+    "worker launch did not export the primary-owned Lavish server address"
+  pass "the primary-owned Lavish server address reaches every worker launch"
+}
+
+test_lavish_absent_config_preserves_destination_ambient() {
+  local rec id out status launch pane_log seen
+  id=profile-lavish-ambient-z18b
+  rec=$(make_spawn_case profile-lavish-ambient claude "$id")
+  read_case_record "$rec"
+  pane_log="$CASE_DIR/pane.log"
+  seen="$CASE_DIR/lavish-seen"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${LAVISH_AXI_HOST-unset}" > "$FM_LAVISH_SEEN"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "an absent Lavish host configuration should allow the worker spawn"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_not_contains "$launch" "LAVISH_AXI_HOST" \
+    "an absent configuration changed the host in the worker launch"
+  assert_not_contains "$(cat "$pane_log")" "LAVISH_AXI_HOST" \
+    "an absent configuration changed the host in the destination pane"
+  FM_LAVISH_SEEN="$seen" LAVISH_AXI_HOST=destination.example PATH="$FAKEBIN_DIR:$PATH" \
+    bash -c "$launch" || fail "the destination-pane launch command failed"
+  assert_grep 'destination.example' "$seen" \
+    "the worker launch did not retain the destination pane's Lavish host"
+  pass "absent Lavish configuration preserves the destination environment"
 }
 
 test_claude_omits_config_dir_prefix_when_unset() {
@@ -1552,6 +1598,8 @@ test_pi_signed_missing_binary_refuses_before_endpoint_or_metadata
 test_pi_signed_persistent_secondmate_uses_pi_extensions_and_identity
 test_batch_forwards_shared_profile_flags
 test_claude_forwards_firstmate_config_dir_when_set
+test_lavish_server_address_is_exported_to_worker_launch
+test_lavish_absent_config_preserves_destination_ambient
 test_claude_omits_config_dir_prefix_when_unset
 test_claude_permission_mode_bypass_matches_absent_launch
 test_claude_permission_mode_auto_swaps_only_the_permission_flag

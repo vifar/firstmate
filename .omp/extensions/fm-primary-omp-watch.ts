@@ -1,7 +1,7 @@
 // Firstmate primary watcher bridge for omp (Oh My Pi).
 //
 // A port of .pi/extensions/fm-primary-pi-watch.ts for the omp fork. The arm,
-// successor, retry, and replacement-handoff logic is the Pi contract verbatim;
+// successor, retry, and replacement-handoff logic follows the Pi contract;
 // the omp-specific differences are stated once here:
 //   - omp auto-discovers this file from <cwd>/.omp/extensions with no trust
 //     gate, so an omp primary or secondmate started inside its home loads it

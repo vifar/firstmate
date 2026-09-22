@@ -194,7 +194,7 @@ CHANGED_DEFAULT_TIMEOUT_SECS=900
 
 # How many separate-runner shards the portable serial remainder splits into.
 # One owner: CI lane names carry this count and are refused when they disagree.
-PORTABLE_SERIAL_SHARDS=5
+PORTABLE_SERIAL_SHARDS=9
 
 # Balance hint for a portable-serial script with no measured duration, close to
 # the measured per-script mean so a newly added test neither starves nor
@@ -351,6 +351,7 @@ family_for_basename() {
     fm-grok-stop-live-e2e.test.sh|fm-harness-adapter-instructions-live-e2e.test.sh|\
     fm-harness-liveness-drift-live-e2e.test.sh|\
     fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|fm-agy-signals-live-e2e.test.sh|\
+    fm-launch-prompt-signals-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-herdr-pi-stale-registration-live-e2e.test.sh|\
     fm-opencode-primary-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
@@ -371,6 +372,8 @@ family_for_basename() {
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-claude-trust.test.sh|\
     fm-trace-context-spawn.test.sh|fm-spawn-worktree-settle.test.sh|\
+    fm-spawn-compact-adviser-disable.test.sh|\
+    fm-spawn-compact-adviser-disable-remote.test.sh|\
     fm-teardown-endpoint-safety.test.sh)
       printf '%s\n' backend-dispatch
       ;;
@@ -657,19 +660,19 @@ list_portable_serial() {
 
 # Measured portable-serial script durations in milliseconds, from the CI timing
 # artifacts recorded in docs/fm-test-portable-shards.md. Each value is the
-# slowest of several green runs, so the balance holds on a slow runner rather
+# slowest successful sample in the referenced complete/partial CI runs, rather
 # than only on the fastest one measured. These are balance hints only: the shard
 # partition stays complete and disjoint whatever they say, so a stale hint costs
 # balance rather than coverage. That doc owns the refresh procedure.
 portable_serial_weight_hints() {
   cat <<'EOF'
-tests/fm-agy-harness.test.sh 11000
-tests/fm-agy-signals-live-e2e.test.sh 23
-tests/fm-afk-contract.test.sh 3000
-tests/fm-afk-inject-e2e.test.sh 35792
-tests/fm-afk-pi-herdr-return-e2e.test.sh 100
-tests/fm-afk-return.test.sh 1837
-tests/fm-ask-user-authority.test.sh 128
+tests/fm-afk-contract.test.sh 15645
+tests/fm-afk-inject-e2e.test.sh 35889
+tests/fm-afk-pi-herdr-return-e2e.test.sh 45
+tests/fm-afk-return.test.sh 20385
+tests/fm-agy-harness.test.sh 47933
+tests/fm-agy-signals-live-e2e.test.sh 49
+tests/fm-ask-user-authority.test.sh 131
 tests/fm-backend-cmux-smoke.test.sh 33
 tests/fm-backend-cmux.test.sh 3657
 tests/fm-backend-orca.test.sh 19253
@@ -2183,6 +2186,13 @@ fi
 # An explicit --jobs names a concurrency for exactly the selection given, so an
 # unproven script in it is a refusal rather than something to schedule around.
 if [ "$JOBS" -gt 1 ] && [ "$AUTO_CONCURRENCY" -eq 0 ]; then
+  # A single heavy suite can occupy a whole serial shard. Its family may have
+  # a separate concurrency proof, but that never changes this lane's contract.
+  if [ "$MODE" = lane ]; then
+    case "$LANE" in
+      portable-serial|portable-serial-*) die "--jobs $JOBS refused: portable serial lanes stay serial; use --jobs 1" ;;
+    esac
+  fi
   for s in "${SCRIPTS[@]}"; do
     if ! script_allows_concurrency "$s"; then
       die "--jobs $JOBS refused: $s is not in the proven-isolated set (see bin/fm-test-isolation-proof.sh --list) and its family has no recorded concurrent proof. Unproven stateful scripts stay serial."

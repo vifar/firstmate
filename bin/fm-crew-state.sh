@@ -258,12 +258,15 @@ pane_readable() {  # <target>
 # isolated rendered-tail fallback; a herdr crew's native `busy` is accepted
 # when no record exists, but its native `idle` is NOT, because agent.get
 # reports generation state (idle while a crew blocks on its own long-running
-# foreground tool call) rather than turn state.
+# foreground tool call) rather than turn state. The tail is captured
+# unconditionally (not just for Grok) so this authoritative read also sees
+# fm_busy_lib's launch-prompt backstop: without it, a launch parked on a
+# recognized interactive prompt would report `working` here while the
+# watcher's own poll (which always captures a tail) already classifies it
+# unknown - the exact split issue #1792 describes for a different cause.
 crew_busy_verdict() {  # <target>
-  local tail40=''
-  case "$HARNESS" in
-    grok*) tail40=$(fm_backend_capture "$TASK_BACKEND" "$1" 40 "$EXPECTED_LABEL" 2>/dev/null) || tail40='' ;;
-  esac
+  local tail40
+  tail40=$(fm_backend_capture "$TASK_BACKEND" "$1" 40 "$EXPECTED_LABEL" 2>/dev/null) || tail40=''
   fm_busy_classify "$TASK_BACKEND" "$1" "$HARNESS" "$ID" "$STATE" "$tail40"
 }
 
@@ -399,7 +402,7 @@ nm_findings_count() {
 }
 nm_gate_step_row() {
   local row step rest status findings
-  row=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*[^,]+,[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*,' | head -1)
+  row=$(printf '%s\n' "$RUN_OUT" | grep -E "$FM_NM_GATE_ROW_RE" | head -1)
   [ -n "$row" ] || return 0
   row=$(trim "$row")
   step=$(trim "${row%%,*}")
@@ -411,7 +414,7 @@ nm_gate_step_row() {
 }
 nm_gate_status() {
   local s row
-  s=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*(status|state):[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*$' | head -1)
+  s=$(printf '%s\n' "$RUN_OUT" | grep -E "$FM_NM_GATE_SCALAR_RE" | head -1)
   if [ -n "$s" ]; then
     s=$(strip_quotes "$(trim "${s#*:}")")
     printf '%s' "$s"
@@ -421,7 +424,7 @@ nm_gate_status() {
   [ -n "$row" ] && { row=${row#*|}; printf '%s' "${row%%|*}"; }
 }
 nm_has_gate() {
-  printf '%s\n' "$RUN_OUT" | grep -Eq '^[[:space:]]*gate:[[:space:]]*'
+  printf '%s\n' "$RUN_OUT" | grep -Eq "$FM_NM_GATE_LINE_RE"
 }
 nm_gate_line_name() {
   local gate step
@@ -449,6 +452,84 @@ nm_gate_findings_count() {
   rest=${rest%%|*}
   case "$rest" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s' "$rest"
+}
+# 0 when the gate's own findings table holds at least one row whose `action`
+# column is exactly `ask-user` - the pipeline's own record that this gate's
+# answer is owed by a HUMAN, not by the crewmate (the gate's shape -
+# awaiting_approval, fix_review, awaiting_agent - is reported parked in every
+# case and does not by itself say who owes the answer; only a findings row whose
+# `action` column is exactly `ask-user` does).
+#
+# Read POSITIONALLY, the way nm_gate_step_row above reads its row: locate the
+# `findings[N]{...}` header, take the index of the `action` column from it, walk
+# each of the N rows that follow to that index, and compare for EQUALITY. A
+# substring search over the run payload cannot make this distinction - the
+# trailing `description` column is free text that routinely quotes finding
+# actions, and the payload also carries the branch name and step names, so a
+# gate owed the crewmate's own answer would match just as readily as one owed a
+# human. Column order is read from the header rather than assumed, so a table
+# that grows a column keeps answering correctly. Both the header match and the
+# row scan require the BRACE, so the count, the index and the rows all come from
+# the same block: an earlier unbraced `findings[N]:` line from a resolved round
+# must not supply the rows while the braced gate table supplies the index, which
+# would read the wrong block's rows at the right block's offset
+# (tests/fm-crew-state.test.sh's unbraced-precursor case pins it).
+#
+# Reading the index out of the header and then walking RAW COMMAS to it is only
+# positional in name: the walk is sound only while every column before `action`
+# is comma-free, and the producer does not quote commas inside `description`
+# (tests/fm-crew-state.test.sh's own fixture proves it). A header ordering that
+# puts free text before `action` would therefore let a row's description mint
+# the marker - silently, with no error - which is the same class of hole the
+# positional derivation exists to close, arriving by a different route. So the
+# columns preceding `action` are checked against a WHITELIST of names this table
+# is known to carry as short comma-free scalars, and anything else refuses:
+# a whitelist rather than a blacklist of free-text names, because an unknown
+# column must read as unsafe rather than as safe. When the table's shape is not
+# provably safe the correct answer is the noisy one - a crewmate that went quiet
+# before answering its own gate is the failure that must never be silenced.
+# Residual bound, which no unquoted positional parse of this table escapes: a
+# comma inside a whitelisted field's own value (a path with a comma in it, say)
+# still shifts the walk.
+nm_gate_awaits_human_decision() {
+  local header count cols idx i name field rows row rest
+  header=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*findings\[[0-9]+\]\{[^}]*\}:' | head -1)
+  [ -n "$header" ] || return 1
+  count=$(printf '%s' "$header" | sed -n 's/^[[:space:]]*findings\[\([0-9][0-9]*\)\].*/\1/p')
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$count" -gt 0 ] || return 1
+  cols=$(printf '%s' "$header" | sed -n 's/^[^{]*{\([^}]*\)}.*/\1/p')
+  [ -n "$cols" ] || return 1
+  idx=0
+  i=0
+  while [ -n "$cols" ]; do
+    i=$((i + 1))
+    name=$(strip_quotes "$(trim "${cols%%,*}")")
+    if [ "$name" = action ]; then idx=$i; break; fi
+    case "$name" in
+      id|severity|file|line) ;;
+      *) return 1 ;;
+    esac
+    case "$cols" in *,*) cols=${cols#*,} ;; *) cols='' ;; esac
+  done
+  [ "$idx" -gt 0 ] || return 1
+  rows=$(printf '%s\n' "$RUN_OUT" \
+    | awk -v n="$count" 'f { print; if (++c >= n) exit; next } /^[[:space:]]*findings\[[0-9]+\]\{/ { f = 1 }')
+  while IFS= read -r row; do
+    case "$row" in *,*) ;; *) continue ;; esac
+    rest=$row
+    i=1
+    while [ "$i" -lt "$idx" ]; do
+      case "$rest" in *,*) rest=${rest#*,} ;; *) rest=''; break ;; esac
+      i=$((i + 1))
+    done
+    [ -n "$rest" ] || continue
+    field=$(strip_quotes "$(trim "${rest%%,*}")")
+    [ "$field" = ask-user ] && return 0
+  done <<EOF
+$rows
+EOF
+  return 1
 }
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
@@ -587,8 +668,40 @@ nm_reclassify_failed_run_as_held_green() {
 # refused socket, timeout, non-zero answer - means the daemon is not provably
 # up, which is the only fact the coarse fallback needs.
 nm_daemon_probe_down() {
-  fm_nm_run_checked "$WT" "$NM_TIMEOUT" daemon status >/dev/null || return 0
-  return 1
+  nm_daemon_probe
+  [ "$NM_DAEMON_ANSWER" != up ]
+}
+
+# 0 only when the probe ANSWERED and that answer was "down". Suppressing a LIVE
+# record needs this stricter question: `not provably up` above is fail-closed,
+# which is safe when it degrades a terminal record to unknown, but on a live
+# record it would drop a working crew back to a possibly-stale status log every
+# time the probe merely ran slow - the crew would flap between working and
+# failed on probe latency alone. 124 is the bounded call's own did-not-answer
+# code (both the timeout and perl arms of fm_nm_run_bounded use it), and proves
+# nothing about the daemon. The no-timeout-tool return of 1 cannot reach here:
+# without a timeout tool the `axi status` read above is empty too, so this whole
+# block is skipped.
+nm_daemon_answered_down() {
+  nm_daemon_probe
+  [ "$NM_DAEMON_ANSWER" = down ]
+}
+
+# ONE bounded `daemon status` call per crew read, cached with the three answers
+# its two readers need to stay distinguishable: `up`, `unanswered` (the bounded
+# call's own 124), and `down`. Collapsing `up` and `unanswered` into a single
+# not-down bucket is what would force a second subprocess, and on a wedged
+# daemon each probe burns the full timeout inside the supervisor's per-crew
+# polling loop.
+nm_daemon_probe() {
+  local rc=0
+  [ -n "$NM_DAEMON_ANSWER" ] && return 0
+  fm_nm_run_checked "$WT" "$NM_TIMEOUT" daemon status >/dev/null || rc=$?
+  case "$rc" in
+    0)   NM_DAEMON_ANSWER=up ;;
+    124) NM_DAEMON_ANSWER=unanswered ;;
+    *)   NM_DAEMON_ANSWER=down ;;
+  esac
 }
 
 nm_ci_step_status() {
@@ -650,7 +763,11 @@ nm_ci_checks_state() {
 # matching run: either it names another branch (routine once several crews
 # validate the same underlying repo concurrently - a worktree with its own
 # active run reliably gets that run answered, even under concurrent load), or
-# it names this branch's run but the strict head rule rejected it. The real
+# it names this branch's run but the strict head rule rejected it - a run that
+# is parked, terminal, or executing with the daemon answered down, since an
+# executing run whose daemon still answers binds before this fallback is
+# reached. The ledger resolves every answer STRICTLY: it never accepts a row on
+# branch name alone, so a head-tied row can re-bind such a record as working. The real
 # run-listing command is the top-level `no-mistakes runs` (the `axi` surface
 # has no runs-listing subcommand; tests/fm-crew-state.test.sh owns the
 # 2026-07-02 dead-code incident history this fallback replaced).
@@ -687,6 +804,8 @@ HAVE_RUN=0
 # word came back from the runs-list fallback, so the run-step block below skips
 # the TOON field parsing entirely for this crew.
 RUN_SOURCE=full
+NM_DAEMON_ANSWER=""
+RUN_DEAD_DAEMON=""
 COARSE_STATUS=""
 SELECTED_RUN_ID=""
 # Scouts and secondmates never drive a no-mistakes validation of their own
@@ -801,13 +920,19 @@ if [ "$HAVE_RUN" = 1 ]; then
   CI_STEP_STATUS=""
   CI_LOG_STATE=""
   RUN_STATUS=""
-  if [ "$RUN_SOURCE" = coarse ]; then
+  if [ -n "$RUN_DEAD_DAEMON" ]; then
+    # ONE dead-instrument verdict for every route that reaches one. It is set,
+    # not emitted, so the status-log reconciliation below still runs: an
+    # unverified record must not silence the crew's own open decision.
+    RUN_STATE=unknown
+    RUN_DETAIL=$RUN_DEAD_DAEMON
+  elif [ "$RUN_SOURCE" = coarse ]; then
     # No step/gate detail is available from the plain runs list - only ever
     # working, done, failed, or unknown. Gate detail requires the identity-aware
     # read above. The status event span remains independently available to the
     # supervisor through fm-classify-lib.sh's status_span_first_actionable.
     case "$COARSE_STATUS" in
-      running)   RUN_STATE=working; RUN_DETAIL="validating (background run)" ;;
+      running) RUN_STATE=working; RUN_DETAIL="validating (background run)" ;;
       completed) RUN_STATE="done";  RUN_DETAIL="run completed" ;;
       failed)
         # The ledger row is terminal but the coarse path has no steps table
@@ -827,7 +952,7 @@ if [ "$HAVE_RUN" = 1 ]; then
     status=$(strip_quotes "$(nm_field status)")
     RUN_STATUS=$status
     outcome=$(strip_quotes "$(nm_field outcome)")
-    awaiting=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*awaiting_agent:' | head -1 || true)
+    awaiting=$(printf '%s\n' "$RUN_OUT" | grep -E "$FM_NM_AWAITING_AGENT_RE" | head -1 || true)
     gate_status=$(nm_gate_status)
     has_gate=0
     nm_has_gate && has_gate=1
@@ -855,8 +980,11 @@ if [ "$HAVE_RUN" = 1 ]; then
       RUN_DETAIL="parked at $gate"
       fcount=$(nm_gate_findings_count)
       [ -n "$fcount" ] && RUN_DETAIL="$RUN_DETAIL: $fcount finding(s)"
-      if printf '%s\n' "$RUN_OUT" | grep -q 'ask-user'; then
-        RUN_DETAIL="$RUN_DETAIL (ask-user: authority decision)"
+      # Its own ${SEP} component, not free text inside the detail: consumers
+      # compare a whole component for equality, so nothing a gate name or a
+      # later note happens to contain can mint it.
+      if nm_gate_awaits_human_decision; then
+        RUN_DETAIL="$RUN_DETAIL${SEP}$FM_GATE_HUMAN_DECISION"
       fi
     else
       case "$status" in
