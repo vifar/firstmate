@@ -528,7 +528,11 @@ cmd_ingest() {
   if [ "$class" = continuity-broken ]; then
     line="blocked [key=remote-reply-continuity-$id]: remote reply continuity broke for $id ($reason)"
     append_rc=0
-    append_status_once "$status_file" "$line" || append_rc=$?
+    if status_event_recorded "$status_file" "$line"; then
+      append_rc=1
+    else
+      append_status_once "$status_file" "$(status_stamp_line "$line")" || append_rc=$?
+    fi
     [ "$append_rc" -ne 2 ] || { fm_lock_release "$lock"; die "cannot append continuity escalation"; }
     fm_lock_release "$lock"
     printf 'continuity-broken: %s (%s)\n' "$id" "$reason"

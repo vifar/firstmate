@@ -13,7 +13,7 @@ The failure repeated across harnesses and homes, and the workaround (remember to
 
 ## What the control plane owns
 
-`bin/fm-control-lib.sh` is the single executable owner of three capability tables, with no side effects, so it can be read as a contract:
+`bin/fm-control-lib.sh` is the single executable owner of three capability tables, which have no side effects, so they can be read as a contract:
 
 - The **verb allowlist**: `interrupt`, `exit`, `relaunch`.
   There is no arbitrary-text and no generic raw-key entry point.
@@ -22,6 +22,8 @@ The failure repeated across harnesses and homes, and the workaround (remember to
   These were previously carried only in the [`harness-adapters`](../.agents/skills/harness-adapters/SKILL.md) skill's tool references, which now point here.
   `bin/fm-send.sh`'s `--key` path reads the composer-clear table from this owner too, rather than keeping a second copy of it.
 - **Per-backend capability**: which named keys a runtime backend can deliver, and whether it has a recovery-grade agent-state classifier able to prove an agent stopped.
+
+The one thing this file owns that is not a pure table is the [endpoint-absence proof](#reclaiming-a-task-whose-endpoint-is-gone) below, which does run backend reads; sourcing the file is still free.
 
 A recorded `harness=` is not always an exact adapter name: a task launched from a raw command records that command's basename instead.
 `fm_control_harness_family` is the one place that prefix rule is stated, and an unrecognized value resolves to no adapter rather than being guessed into one.
@@ -78,6 +80,58 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
    Control revalidates and reloads that record before checking replacement liveness.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
+
+### Reclaiming a task whose endpoint is gone
+
+A Herdr pane or workspace can be destroyed out from under a live task by churn or a session restart.
+The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
+
+**Reclaim is Herdr-only.** On tmux, both verbs refuse a `missing` endpoint, leaving it exactly as deadlocked as it was before this mechanism existed - deliberately, and with the reason stated rather than guessed past.
+
+Two endpoint verdicts are agent-free, and both license a relaunch:
+
+- `dead` - the endpoint exists and confidently holds no agent. It is **adopted**, so the task keeps its exact recorded address.
+- gone, **proven** - there is no endpoint and therefore no agent, and it cannot be adopted, so the launch owner **creates one fresh endpoint in the recorded worktree** and the republished record rebinds the task to it.
+
+That proof is its own step, because the classifier's `missing` is not one state: it conflates *the endpoint was destroyed* with *the endpoint is unreachable from here right now*.
+An unreachable endpoint can still hold the live agent a rebind would duplicate, so absence is proven and never inferred from a failed read - and whether it is provable at all is a property of the backend:
+
+- **Herdr can prove it.** Every read goes through the adapter's `--session <session>` CLI, so the recheck starts and reads the session the *record* names, through that session's own socket.
+  It starts that server (only the server: no workspace and no tab are created) and **re-reads the recorded pane**.
+  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; only a second `missing` proves the pane itself did not survive ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
+  That server start is a real side effect, and the parenthetical above does not cover it: when the recorded session's server no longer exists at all, the probe stands a fresh empty one up in order to ask, and nothing afterwards uses it.
+  So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
+- **tmux cannot.** `list-windows -a` describes only the tmux server the *current process* addresses (its `TMUX_TMPDIR`/socket), and a task record carries no socket identity for its endpoint.
+  A different but running server would answer "not anywhere" about a window it was never able to see, so a server-wide read cannot tell a destroyed window from one on a server this process cannot address.
+  There is no read available that closes that gap, so tmux always refuses - for a renamed session, a moved window, a foreign socket, and a dead server alike.
+
+Every transient or self-contradicting read stays `unreadable` or `ambiguous` and still refuses, so a momentary backend failure can never be mistaken for absence.
+
+That proof has one owner for the whole control plane (`fm_control_endpoint_absence_verdict` in `bin/fm-control-lib.sh`), so `exit` and `relaunch` cannot reach two different answers about one endpoint.
+`exit` reports what the proof established and nothing more - see its row in the verb table above.
+
+What a reclaim is not:
+
+- It is **not a teardown**. The worktree is reused exactly as the previous agent left it; nothing unlanded is ever discarded, and the ordinary `--note` requirement still applies.
+- It does **not** change the task's identity. The task id, its armed poll and registration, and its status log are untouched; only the endpoint binding in the record moves.
+  Its instructions are the one exception, and only in the way an ordinary relaunch already changes them: a ship or scout reclaim appends the required `--note` under a `## Progress note (<timestamp>)` heading in `data/<id>/brief.md`, so re-read that brief rather than assuming it is byte-identical - a reclaim that failed and was retried leaves one block per attempt.
+  A secondmate's standing charter is never rewritten.
+- It is **not** a peer seat's operation. `fm-control` resolves an exact task id against **this** home's `state/`, so only the home that owns the task can reclaim it.
+- It does **not** cover a secondmate. A secondmate whose endpoint is gone already has one owner for that recovery - `bin/fm-spawn.sh <id> --secondmate`, driven by the session-start liveness sweep - so relaunch refuses and names it rather than becoming a second path to the same outcome.
+
+The re-created tab is opened in the herdr session the record names, never in whichever session the recovering seat happens to sit in - relocating a task onto another herdr server would be an identity change published as a self-consistent but wrong record.
+A seat that *claims* a herdr launcher pane belonging to a different session is refused rather than allowed to place the endpoint somewhere else, so reclaim such a task from a seat in the recorded session.
+A seat with no herdr launcher pane at all - a plain ssh or cron shell, which is the ordinary way an operator reclaims - is not refused: placement falls back to the recorded session's labeled container, so the tab still lands in the session the record names.
+The reclaim pins the recorded **session** but not the **workspace**: the container follows the reclaiming seat, so a reclaim run from a seat inside the recorded session places the new tab in *that seat's* workspace rather than the recorded `herdr_workspace_id`, even when the recorded workspace still exists and only the pane was destroyed.
+The record is republished consistently and no work is lost, but the task's `herdr_workspace_id` moves with it.
+The pane id necessarily changes (the pane did not survive), and the record follows it.
+A Herdr reclaim deliberately uses the flat container shape rather than presentation projection: projection is a presentation-only layout that is never endpoint or ownership authority, and flat is already the documented fallback for every recovery it cannot bind exactly ([`docs/herdr-backend.md`](herdr-backend.md)).
+
+**Known limitation - a refusal before the record is republished leaves a stray husk pane** (follow-up bead `fm-herdr-rebind-leak-20260913`).
+The rebind registers no abort cleanup, so a refusal in the window between the new tab being created and the record being republished leaves that pane behind while the record still names the old, gone one.
+The stray pane holds a bare shell - the harness is not delivered until after publication - so the next reclaim cleans up after it: the re-created tab carries the same `fm-<id>` label, `tab create` finds it, classifies it a husk, and closes and replaces it.
+That self-heals only when the retry resolves the *same* workspace, which the placement rule above does not guarantee.
+The worktree and the task's records are unaffected either way.
 
 ### Failure and rollback
 

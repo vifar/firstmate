@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Shared quota-axi compatibility floor for the bootstrap diagnostic.
+# Shared quota-axi compatibility floor for the bootstrap diagnostic, the
+# --json snapshot validator, and the provider-row join dispatch consumers use.
 # Usage: . bin/fm-quota-axi-lib.sh
 #
 # FM_QUOTA_AXI_MIN follows the axi-family floor policy owned beside the floor
@@ -8,6 +9,13 @@
 # This file is the single owner of that version number. bin/fm-bootstrap.sh
 # turns a failing check into the operator-facing MISSING diagnostic, which is
 # what keeps an older build from reaching a dispatch intake at all.
+#
+# Snapshot schemas: fm_quota_json_valid accepts quota-axi schema 5 (one row per
+# provider, no accountKey) and schema 6 (every row carries accountKey, unique on
+# provider + accountKey; quota-axi emits it once any provider expands to more
+# than one account). Schema 5 keeps its exact pre-schema-6 rules so an older
+# quota-axi keeps working unchanged. FM_QUOTA_ROW_JQ is the one join used to
+# bind a candidate to its row under either schema.
 
 FM_QUOTA_AXI_MIN=0.1.29
 FM_QUOTA_PROVIDER_ID_RE='^[a-z0-9]+(-[a-z0-9]+)*\z'
@@ -47,9 +55,18 @@ fm_quota_json_valid() {
     length == 1 and
     (.[0] | type) == "object" and
     (.[0] |
-      .schemaVersion == 5 and
       (.providers | type) == "array" and
-      (([.providers[].provider] | length) == ([.providers[].provider] | unique | length)) and
+      (if .schemaVersion == 5 then
+         (([.providers[].provider] | length) == ([.providers[].provider] | unique | length))
+       elif .schemaVersion == 6 then
+         all(.providers[];
+           (.accountKey | type) == "string" and
+           (.accountKey | length) > 0 and
+           ((.accountKey | test("\\s")) | not)) and
+         (([.providers[] | [.provider, .accountKey]] | length) ==
+          ([.providers[] | [.provider, .accountKey]] | unique | length))
+       else false
+       end) and
       all(.providers[];
       (.provider | type) == "string" and
       (.provider | test($provider_re)) and

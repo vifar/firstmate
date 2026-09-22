@@ -105,6 +105,10 @@ case "${1:-}" in
   daemon)
     # FM_FAKE_DAEMON_DOWN: the explicit down-probe fails, as the real
     # `no-mistakes daemon status` does when the daemon is not running.
+    # FM_FAKE_DAEMON_TIMEOUT: the probe does not answer at all, which is what
+    # the bounded call reports as 124 when `timeout` kills a slow daemon status.
+    [ -z "${FM_FAKE_DAEMON_PROBE_LOG:-}" ] || printf 'probe\n' >> "$FM_FAKE_DAEMON_PROBE_LOG"
+    [ "${FM_FAKE_DAEMON_TIMEOUT:-0}" = 1 ] && exit 124
     [ "${FM_FAKE_DAEMON_DOWN:-0}" = 1 ] && exit 1
     printf '%s\n' 'daemon running (pid 4242)'
     exit 0 ;;
@@ -420,6 +424,95 @@ run:
   findings[2]{id,severity,file,line,action,description}:
     r1,warning,a.go,,auto-fix,ignored error
     r2,error,b.go,,ask-user,changes product behavior
+gate: review
+EOF
+}
+
+# A gate owed the CREWMATE's own answer: every finding's `action` column is
+# auto-fix. The free-text `description` column is where this repository's own
+# review output routinely quotes finding actions, so one row spells the token out
+# the way an enumeration does - surrounded by commas, in the exact shape a
+# substring or unanchored-regex derivation would accept - and the branch name
+# carries it too. Both are the counterexample: the ONLY thing that may mint the
+# human-decision component is the `action` column read by position.
+run_parked_crewmate_gate_with_ask_user_prose() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[2]{id,severity,file,line,action,description}:
+    r1,warning,a.go,,auto-fix,the action field is one of no-op, auto-fix, ask-user, so pick one
+    r2,warning,b.go,,auto-fix,ignored error
+gate: review
+EOF
+}
+
+# The same gate with the findings table's columns in a different order, so the
+# derivation is proven to read the column INDEX out of the header rather than
+# assuming action is the fifth field. Only the last row is owed a human.
+run_parked_reordered_columns() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: awaiting_approval
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[2]{severity,action,id,file,line,description}:
+    warning,auto-fix,r1,a.go,,ignored error
+    error,ask-user,r2,b.go,,changes product behavior
+gate: review
+EOF
+}
+
+# The same crewmate-owed gate with `description` placed BEFORE `action` in the
+# header. Every row's real action column is auto-fix, but one description spells
+# the token out surrounded by commas at exactly the comma offset the `action`
+# index lands on, so a derivation that reads the index from the header and then
+# walks raw commas to it accepts free text as the action. The table's shape is
+# not provably safe here, so the only correct answer is to keep the ladder.
+run_parked_free_text_before_action() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[1]{id,severity,file,line,description,action}:
+    r1,warning,a.go,12,the action field is one of auto-fix, ask-user,auto-fix
+gate: review
+EOF
+}
+
+# The same crewmate-owed gate preceded by an UNBRACED `findings[N]:` block from
+# an earlier, already-resolved round. The braced header that follows is the live
+# gate's table and is the one the column index is read from, so the rows walked
+# must be that table's rows too. An earlier block carrying `ask-user` at the very
+# comma offset the braced header's `action` index resolves to is the counter-
+# example: a row scan that anchors on the looser unbraced pattern reads the wrong
+# block's rows at the right block's index, and mints the component for a gate
+# whose every action is auto-fix.
+run_parked_unbraced_findings_precursor() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[2]:
+    prior-1,warning,a.go,ask-user,an earlier already-resolved block
+    prior-2,info,b.go,ask-user,another earlier row
+  findings[1]{id,severity,file,action,description}:
+    r1,warning,a.go,auto-fix,the live gate is owed to the crewmate
 gate: review
 EOF
 }
@@ -846,6 +939,109 @@ test_genuine_parked_not_superseded() {
   assert_contains "$out" "ask-user" "parked surfaces ask-user finding"
   assert_not_contains "$out" "superseded" "agreeing parked+needs-decision not flagged stale"
   pass "genuine parked run is not flagged superseded"
+}
+
+# Which HUMAN owes a parked gate its answer is the distinction the watcher's
+# wedge deferral rests on, so the component that carries it must come from the
+# findings table's `action` column and from nothing else. Both directions, plus
+# the counterexample a text match would have accepted.
+test_parked_human_decision_comes_from_the_action_column() {
+  local d out
+  reset_fakes
+  d=$(new_case parked-ask-user-action-column)
+  make_repo_on_branch "$d/wt" fm/feat-au
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-au.meta" "window=fm:fm-feat-au" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-au.status"
+  FM_FAKE_AXI_STATUS="$(run_parked fm/feat-au)"
+  out=$(run_crew_state "$d" feat-au)
+  assert_contains "$out" "state: parked" "an ask-user row still reports parked"
+  assert_contains "$out" " · ask-user: authority decision" \
+    "an action column of ask-user mints the human-decision component"
+
+  # The counterexample. Nothing here is owed a human: every action column is
+  # auto-fix. A description enumerating the action values, and a branch named
+  # after the same token, must not mint the component - a crewmate that goes
+  # quiet before answering its own gate has to keep the wedge ladder.
+  reset_fakes
+  d=$(new_case parked-ask-user-prose-only)
+  make_repo_on_branch "$d/wt" fm/ask-user-authority-fix
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ap.meta" "window=fm:fm-feat-ap" "worktree=$d/wt" "kind=ship"
+  printf 'working: validation under way\n' > "$d/state/feat-ap.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_crewmate_gate_with_ask_user_prose fm/ask-user-authority-fix)"
+  # Guard the counterexample against going vacuous: the payload this gate is read
+  # from must really contain the token in a position a substring or unanchored
+  # regex would accept, or the case below proves nothing.
+  assert_contains "$FM_FAKE_AXI_STATUS" ", ask-user," \
+    "the counterexample payload must carry the token where a naive match accepts it"
+  assert_contains "$FM_FAKE_AXI_STATUS" "branch: fm/ask-user-authority-fix" \
+    "the counterexample payload must also carry the token in its branch name"
+  out=$(run_crew_state "$d" feat-ap)
+  assert_contains "$out" "state: parked" "a crewmate-owed gate still reports parked"
+  assert_not_contains "$out" " · ask-user: authority decision" \
+    "free text and a branch name must not mint the human-decision component"
+
+  # Column order is read from the header, not assumed.
+  reset_fakes
+  d=$(new_case parked-ask-user-reordered)
+  make_repo_on_branch "$d/wt" fm/feat-ar
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ar.meta" "window=fm:fm-feat-ar" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-ar.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_reordered_columns fm/feat-ar)"
+  out=$(run_crew_state "$d" feat-ar)
+  assert_contains "$out" " · ask-user: authority decision" \
+    "the action column is located by header index, not by fixed position"
+
+  # A header index alone is not enough, because the row is split on raw commas.
+  # With `description` ahead of `action` the comma walk lands inside free text,
+  # so a gate whose every action is auto-fix would mint the component. The table
+  # is not provably safe to walk, so the derivation must refuse and the crewmate
+  # must keep the wedge ladder.
+  reset_fakes
+  d=$(new_case parked-free-text-before-action)
+  make_repo_on_branch "$d/wt" fm/feat-af
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-af.meta" "window=fm:fm-feat-af" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-af.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_free_text_before_action fm/feat-af)"
+  # Non-vacuity: the payload must really carry the token at the comma offset the
+  # `action` index resolves to, or the case below proves nothing.
+  assert_contains "$FM_FAKE_AXI_STATUS" "findings[1]{id,severity,file,line,description,action}:" \
+    "the fixture must really place free text before the action column"
+  assert_contains "$FM_FAKE_AXI_STATUS" ", ask-user," \
+    "the fixture description must carry the token where the comma walk would accept it"
+  out=$(run_crew_state "$d" feat-af)
+  assert_contains "$out" "state: parked" "an unsafe findings header still reports parked"
+  assert_not_contains "$out" " · ask-user: authority decision" \
+    "a findings header that puts free text before action must not mint the human-decision component"
+
+  # The header and the rows must come from the SAME block. An earlier unbraced
+  # `findings[N]:` block ahead of the live gate's braced table would otherwise
+  # supply the rows while the braced header supplies the count and the `action`
+  # index, so the walk reads the wrong rows at the right index. Here that earlier
+  # block carries ask-user at exactly that offset while the live gate's only row
+  # is auto-fix: the crewmate owes this gate its own answer and must keep the
+  # wedge ladder.
+  reset_fakes
+  d=$(new_case parked-unbraced-findings-precursor)
+  make_repo_on_branch "$d/wt" fm/feat-ub
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ub.meta" "window=fm:fm-feat-ub" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-ub.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_unbraced_findings_precursor fm/feat-ub)"
+  # Non-vacuity: the payload must really carry an unbraced findings block ahead
+  # of the braced one, with the token at the offset the walk would land on.
+  assert_contains "$FM_FAKE_AXI_STATUS" "findings[2]:" \
+    "the fixture must really place an unbraced findings block before the gate's table"
+  assert_contains "$FM_FAKE_AXI_STATUS" ",ask-user," \
+    "the earlier block must carry the token where the wrong-block walk would accept it"
+  out=$(run_crew_state "$d" feat-ub)
+  assert_contains "$out" "state: parked" "an unbraced findings precursor still reports parked"
+  assert_not_contains "$out" " · ask-user: authority decision" \
+    "rows from an earlier unbraced findings block must not mint the human-decision component"
+  pass "the parked human-decision component is derived from the findings table's action column"
 }
 
 test_scalar_gate_parked_not_superseded() {
@@ -1697,6 +1893,40 @@ test_no_run_busy_pane() {
   assert_contains "$out" "source: pane" "busy record -> pane source"
   assert_contains "$out" "claude-hook" "the working verdict names its semantic source"
   pass "no run + a busy semantic record reads working, attributed to its source"
+}
+
+# A launch pinned at the fm-spawn seed (no hook has posted yet) whose pane
+# renders a recognized interactive prompt must read unknown, never working -
+# this is the load-bearing link the launch-prompt backstop depends on:
+# fm-watch.sh's pause_state_class absorbs a stale pane as "provably working"
+# whenever THIS script reports `state: working · source: pane`, so if this
+# authoritative read still said working, the watcher would silently swallow
+# the wake even though bin/fm-busy-lib.sh's own classifier had already flipped
+# to unknown launch-prompt. crew_busy_verdict must therefore capture a real
+# tail for every harness, not only grok, so the backstop's own tail-based
+# check ever runs here at all.
+test_no_run_launch_prompt_parked_is_not_working() {
+  reset_fakes
+  local d; d=$(new_case launch-prompt)
+  make_repo_on_branch "$d/wt" fm/feat-lp
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-lp.meta" "window=fm:fm-feat-lp" "worktree=$d/wt" "kind=ship" "harness=claude"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_BUSY=1
+  FM_FAKE_BUSY_TEXT='Quick safety check: Is this a project you created or one you trust? ...
+> No, exit
+  Yes, I trust this folder
+Enter to confirm . Esc to cancel'
+  export FM_FAKE_BUSY_TEXT
+  # arm only, never apply: the launch turn has never advanced past the seed
+  # fm-spawn.sh writes at spawn time.
+  "$ROOT/bin/fm-busy-event.sh" arm "$d/state" feat-lp >/dev/null
+  local out; out=$(run_crew_state "$d" feat-lp)
+  assert_not_contains "$out" "state: working" "a launch parked on its trust dialog must never read working"
+  assert_contains "$out" "state: unknown" "a parked launch reads unknown, not busy or idle"
+  assert_contains "$out" "launch-prompt" "the unknown verdict names the launch-prompt backstop as its source"
+  pass "a launch parked on a recognized interactive prompt never reads working, closing the absorb path a stale watcher poll depends on"
 }
 
 # A converted adapter must NOT read working from rendered footer text: the
@@ -2731,9 +2961,34 @@ EOF
   pass "coarse scan with a mismatched anchor stays unknown and lets the pane answer"
 }
 
-# Negative control: the exemption is gated on pipeline_owned specifically - any
-# other branch_sync state keeps the strict head rule.
-test_non_pipeline_owned_unresolvable_head_not_attributed() {
+# The same ledger with the newest row TERMINAL keeps the strict rule: a finished
+# run on a diverged head is history, not this worktree's current run.
+test_coarse_terminal_row_at_foreign_head_not_attributed() {
+  reset_fakes
+  local d; d=$(new_case f10-coarse-terminal)
+  make_repo_on_branch "$d/wt" fm/feat-f10h
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-f10h.meta" "window=fm:fm-feat-f10h" "worktree=$d/wt" "kind=ship" "harness=claude"
+  printf 'working: implementing\n' > "$d/state/feat-f10h.status"
+  FM_FAKE_AXI_STATUS="$(run_running fm/other-crew)"
+  FM_FAKE_RUNS_LIST="$(cat <<EOF
+  running    fm/other-crew aaaaaaa  2026-08-27 14:00
+  failed     fm/feat-f10h f0f0f0f0  2026-08-27 13:53
+EOF
+)"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" feat-f10h
+  local out; out=$(run_crew_state "$d" feat-f10h)
+  assert_not_contains "$out" "source: run-step" "a terminal row at an unresolvable head must not bind"
+  assert_not_contains "$out" "state: failed" "an unattributed terminal row must not read as failure"
+  assert_contains "$out" "source: status-log" "the status log answers without an attributable run"
+  pass "coarse terminal row at a foreign head is not attributed"
+}
+
+# An EXECUTING run on the task's branch binds whatever branch_sync says and
+# whatever its head, so the pipeline_owned exemption is no longer the only way a
+# live run with an unresolvable lane head is attributed.
+test_executing_run_binds_without_pipeline_owned_sync() {
   reset_fakes
   local d; d=$(new_case f10-not-owned)
   make_repo_on_branch "$d/wt" fm/feat-f10d
@@ -2745,9 +3000,64 @@ test_non_pipeline_owned_unresolvable_head_not_attributed() {
   FM_FAKE_BUSY=0
   arm_idle_record "$d/state" feat-f10d
   local out; out=$(run_crew_state "$d" feat-f10d)
-  assert_not_contains "$out" "source: run-step" "a non-pipeline-owned unresolvable head must not bind"
-  assert_contains "$out" "source: status-log" "falls back to the status log without the exemption"
-  pass "the exemption requires branch_sync.state=pipeline_owned"
+  assert_contains "$out" "source: run-step" "an executing run binds without the pipeline_owned label"
+  assert_contains "$out" "state: working" "the executing run reads working"
+  pass "an executing run binds regardless of branch_sync state"
+}
+
+# Negative control: a run PARKED at a gate keeps the strict head rule, so a
+# non-pipeline_owned parked run at an unresolvable head is not attributed. The
+# ledger carries a live same-branch row at that same unresolvable head - the
+# coarse fallback must not revive the rejected run's gate detail through it,
+# because a bare `running` row cannot tell working from waiting at a gate.
+test_non_pipeline_owned_parked_unresolvable_head_not_attributed() {
+  reset_fakes
+  local d; d=$(new_case f10-parked-not-owned)
+  make_repo_on_branch "$d/wt" fm/feat-f10p
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-f10p.meta" "window=fm:fm-feat-f10p" "worktree=$d/wt" "kind=ship" "harness=claude"
+  printf 'working: implementing\n' > "$d/state/feat-f10p.status"
+  FM_FAKE_RUN_HEAD=f0f0f0f0
+  FM_FAKE_AXI_STATUS="$(run_parked fm/feat-f10p)
+branch_sync:
+  state: synced"
+  FM_FAKE_RUNS_LIST="  running    fm/feat-f10p f0f0f0f0  2026-08-27 13:53"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" feat-f10p
+  local out; out=$(run_crew_state "$d" feat-f10p)
+  assert_not_contains "$out" "source: run-step" "a non-pipeline-owned parked run at an unresolvable head must not bind"
+  assert_not_contains "$out" "parked at" "a live ledger row must not revive the rejected run's gate detail"
+  assert_contains "$out" "source: status-log" "falls back to the status log for the unbound parked run"
+  pass "a parked run keeps the strict head rule without pipeline_owned"
+}
+
+# The CLI leaves the top-level `status:` word at `running` while a run WAITS at
+# a gate, so the word alone cannot decide "executing". A gate-parked run at an
+# unresolvable head, on a branch the pipeline has released, must keep the strict
+# head rule in both gate shapes - otherwise the crew reports a stale
+# `parked at <gate>` from a run whose code identity was never verified.
+test_gate_parked_run_with_live_status_word_not_attributed() {
+  local fixture d out
+  for fixture in run_parked_scalar_gate_running run_parked_in_gate_block; do
+    reset_fakes
+    d=$(new_case "f10-gate-parked-$fixture")
+    make_repo_on_branch "$d/wt" fm/feat-f10q
+    make_fakebin "$d" >/dev/null
+    fm_write_meta "$d/state/feat-f10q.meta" "window=fm:fm-feat-f10q" "worktree=$d/wt" "kind=ship" "harness=claude"
+    printf 'working: implementing\n' > "$d/state/feat-f10q.status"
+    FM_FAKE_RUN_HEAD=f0f0f0f0
+    FM_FAKE_AXI_STATUS="$($fixture fm/feat-f10q)
+branch_sync:
+  state: synced"
+    FM_FAKE_RUNS_LIST=""
+    FM_FAKE_BUSY=0
+    arm_idle_record "$d/state" feat-f10q
+    out=$(run_crew_state "$d" feat-f10q)
+    assert_not_contains "$out" "source: run-step" "$fixture: a gate-parked run at an unresolvable head must not bind"
+    assert_not_contains "$out" "parked at" "$fixture: no gate detail may come from an unverified run"
+    assert_contains "$out" "source: status-log" "$fixture: the status log answers for the unbound parked run"
+    pass "$fixture keeps the strict head rule despite its live status word"
+  done
 }
 
 # Negative control: the exemption also requires an ACTIVE run - a terminal run
@@ -2839,11 +3149,11 @@ EOF
   pass "active fix round with an unfetched pipeline head reads working"
 }
 
-# Negative control for the ledger continuation rule: without the anchor row
-# ending at exactly this worktree's head, an active row with an unverifiable
-# head is branch-name coincidence and must stay unattributed - the historical
-# status-log fallback answers instead, never the runs rows.
-test_unanchored_unfetched_active_row_does_not_match() {
+# A live run on the task's branch is authoritative regardless of head, so an
+# active row with an unverifiable head binds even when the ledger cannot anchor
+# it to this worktree's head: the older row and the historical status-log
+# `failed:` event never answer for the live run.
+test_unanchored_unfetched_active_row_still_binds() {
   reset_fakes
   local d h2 out
   d=$(new_case unfetched-no-anchor)
@@ -2858,7 +3168,7 @@ test_unanchored_unfetched_active_row_does_not_match() {
   FM_FAKE_RUN_HEAD="$h2"
   FM_FAKE_AXI_STATUS="$(run_fixing fm/feat-noanchor)"
   # The row before the active one is an OLDER commit, not this worktree's
-  # head: the ledger proves nothing about whose run the active row is.
+  # head: the ledger anchor proves nothing, and the live run binds anyway.
   FM_FAKE_RUNS_LIST="$(cat <<EOF
   running    fm/other aaaaaaa  2026-07-30 22:10
   running    fm/feat-noanchor $(git -C "$d/wt.pipe" rev-parse --short=7 HEAD)  2026-07-30 22:05
@@ -2868,10 +3178,10 @@ EOF
   FM_FAKE_BUSY=0
   arm_idle_record "$d/state" noanchor
   out=$(run_crew_state "$d" noanchor)
-  assert_not_contains "$out" "source: run-step" "an unanchored unverifiable active row must not match"
-  assert_contains "$out" "source: status-log" "historical fallback preserved when no active run is proven"
-  assert_contains "$out" "state: failed" "status-log answers, not the runs rows"
-  pass "unanchored unverifiable active row is never attributed"
+  assert_contains "$out" "source: run-step" "an unanchored active row on the branch still binds"
+  assert_contains "$out" "state: working" "the live run reads working"
+  assert_not_contains "$out" "state: failed" "neither the older failed row nor the stale status-log event answers"
+  pass "unanchored unverifiable active row is attributed because it is live"
 }
 
 # Negative control: a TERMINAL row whose commit object is gone from the task
@@ -3546,6 +3856,7 @@ test_single_owner_terminal_declaration_supersedes_stale_decision
 test_latest_status_preserves_legacy_completions
 test_latest_status_subshell_work_does_not_grow_with_history
 test_genuine_parked_not_superseded
+test_parked_human_decision_comes_from_the_action_column
 test_scalar_gate_parked_not_superseded
 test_gate_block_parked_not_superseded
 test_ci_ready_done_log_beats_monitoring_run
@@ -3587,6 +3898,7 @@ test_terminal_run_without_live_sibling_is_unchanged
 test_coarse_run_does_not_probe_other_branch_ci_log_for_ready_status
 test_other_branch_run_ignored
 test_no_run_busy_pane
+test_no_run_launch_prompt_parked_is_not_working
 test_no_run_footer_text_alone_is_not_working
 test_no_run_grok_uses_isolated_fallback
 test_no_run_herdr_unknown_uses_backend_capture
@@ -3622,11 +3934,14 @@ test_pipeline_owned_active_run_beats_superseded_failed_row
 test_failed_run_with_no_later_run_still_surfaces
 test_coarse_unresolvable_active_row_never_falls_to_older_row
 test_coarse_mismatched_anchor_falls_to_pane_not_older_row
-test_non_pipeline_owned_unresolvable_head_not_attributed
+test_coarse_terminal_row_at_foreign_head_not_attributed
+test_executing_run_binds_without_pipeline_owned_sync
+test_non_pipeline_owned_parked_unresolvable_head_not_attributed
+test_gate_parked_run_with_live_status_word_not_attributed
 test_pipeline_owned_terminal_run_not_exempt
 test_missing_run_head_falls_back_to_current_state
 test_active_fix_round_unfetched_pipeline_head_reports_current
-test_unanchored_unfetched_active_row_does_not_match
+test_unanchored_unfetched_active_row_still_binds
 test_unresolved_terminal_row_is_history_not_current
 test_runs_list_continuation_found_when_axi_answers_other_branch
 test_no_run_herdr_stale_registration_over_shell_reads_agent_gone
