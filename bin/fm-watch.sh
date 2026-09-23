@@ -770,6 +770,14 @@ watch_record_key_from_file() {  # <basename>
     .count-*) printf '%s' "${1#.count-}" ;;
     .stale-*) printf '%s' "${1#.stale-}" ;;
     .paused-*) printf '%s' "${1#.paused-}" ;;
+    .seen-*)
+      case "$1" in
+        .seen-procevent-*|.seen-procevent.*) return 1 ;;
+        .seen-*_status) printf 'task:%s' "${1#.seen-}" | sed 's/_status$//' ;;
+        .seen-*_turn-ended) printf 'task:%s' "${1#.seen-}" | sed 's/_turn-ended$//' ;;
+        *) return 1 ;;
+      esac
+      ;;
     *) return 1 ;;
   esac
 }
@@ -784,14 +792,25 @@ watch_record_past_grace() {
 }
 
 watch_record_window_absent() {
-  local key=$1 w backend meta task verdict
+  local key=$1 w backend meta task verdict local_raw
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     task=${meta##*/}
     task=${task%.meta}
+    if [[ $key == task:* ]]; then
+      [ "$task" = "${key#task:}" ] || continue
+    else
+      w=$(fm_backend_target_of_meta "$meta" 2>/dev/null) || {
+        if grep -q '^window=' "$meta" 2>/dev/null; then
+          local_raw=$(sed -n 's/^window=//p' "$meta" | head -n 1)
+          [ "$(window_key "$local_raw")" = "$key" ] && return 1
+        fi
+        continue
+      }
+      [ "$(window_key "$w")" = "$key" ] || continue
+    fi
     (fm_backend_validate_task_endpoint "$meta" "$task") >/dev/null 2>&1 || return 1
     w=$(fm_backend_target_of_meta "$meta") || return 1
-    [ "$(window_key "$w")" = "$key" ] || continue
     backend=$(fm_backend_of_meta "$meta")
     verdict=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null) || return 1
     [ "$verdict" = missing ] || return 1
@@ -804,7 +823,7 @@ retire_dead_window_records() {
   [ ! -f "$STATE/.watch-record-sweep-cursor" ] \
     || IFS= read -r cursor < "$STATE/.watch-record-sweep-cursor" \
     || cursor=''
-  for file in "$STATE"/.*-*; do
+  for file in "$STATE"/.*-* "$STATE"/.seen-*_status "$STATE"/.seen-*_turn-ended; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     base=${file##*/}
     [ -z "$cursor" ] || [[ $base > $cursor ]] || continue
@@ -818,8 +837,14 @@ retire_dead_window_records() {
     printf '%s\n' "$base" > "$STATE/.watch-record-sweep-cursor" || return 1
     [ "$processed" -lt 64 ] || return 0
   done
+  if [ "$processed" -eq 0 ] && [ -n "$cursor" ]; then
+    rm -f -- "$STATE/.watch-record-sweep-cursor"
+    retire_dead_window_records
+    return $?
+  fi
   [ "$processed" -ne 0 ] || rm -f -- "$STATE/.watch-record-sweep-cursor"
 }
+
 
 # Print the oldest structurally valid ACTIONABLE row in a local secondmate's
 # foreign queue. A stale recheck that explicitly identifies itself as a declared
