@@ -75,7 +75,12 @@
 #   3. Reconcile the status log through fm-classify-lib.sh's status_current_line:
 #      open decisions survive unrelated events and continuation prose cannot
 #      hide a declaration. Ship/scout terminal declarations supersede stale log
-#      decisions. If it says needs-decision/blocked but
+#      decisions. A run record created before a newer done/paused declaration is
+#      historical, not authoritative: the task's own later delivery or deliberate
+#      wait supersedes that abandoned validation verdict. The terminal run id is
+#      an ULID, so its leading timestamp is compared with the status line's
+#      `[at=<epoch>]` timestamp. A genuinely current failed run still wins when
+#      no later task declaration exists. If it says needs-decision/blocked but
 #      the run-step shows the run moved on, the log is deterministically stale and
 #      is flagged superseded. A genuinely parked run plus a needs-decision log
 #      agree, and are reported as parked. A `blocked:` line that reports a
@@ -1073,6 +1078,30 @@ if [ "$HAVE_RUN" = 1 ]; then
       fi
       ;;
   esac
+
+  # A newer stamped delivery or merge-wait declaration supersedes only an
+  # attributed failed run, and only when both source timestamps are valid.
+  if [ "$RUN_SOURCE" = full ] && [ "$RUN_STATE" = failed ] && [ "$outcome" = failed ] \
+    && { [ "$LOG_VERB" = "done" ] || status_is_paused "$LOG_LINE"; }; then
+    RUN_ID_TIME=$(python3 - "$(strip_quotes "$(nm_field id)")" <<'PY'
+import sys
+s = sys.argv[1][:10]
+alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+if len(s) != 10 or any(c not in alphabet for c in s):
+    raise SystemExit(1)
+n = 0
+for c in s:
+    n = n * 32 + alphabet.index(c)
+print(n // 1000)
+PY
+    ) || RUN_ID_TIME=
+    LOG_EVENT_TIME=$(status_line_at_epoch "$LOG_LINE" 2>/dev/null || true)
+    if [ -n "$RUN_ID_TIME" ] && [ -n "$LOG_EVENT_TIME" ] \
+      && [ "$LOG_EVENT_TIME" -gt "$RUN_ID_TIME" ]; then
+      RUN_STATE=$(map_log_state "$LOG_LINE")
+      RUN_DETAIL="$(status_line_note "$LOG_LINE")${SEP}newer task declaration supersedes failed run"
+    fi
+  fi
 
   [ -z "$SELECTED_RUN_ID" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run: $SELECTED_RUN_ID"
   emit "$RUN_STATE" run-step "$RUN_DETAIL"

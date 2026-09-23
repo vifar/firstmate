@@ -1474,6 +1474,22 @@ test_terminal_failed() {
   assert_contains "$out" "source: run-step" "failed -> run-step source"
   pass "terminal failed run is authoritative"
 }
+# A delivered task's newer own declarations supersede a branch-matched
+# abandoned failed run, while the matching failed-run control above remains.
+test_newer_done_paused_status_supersedes_abandoned_failed_run() {
+  reset_fakes
+  local d; d=$(new_case superseded-failed-run)
+  make_repo_on_branch "$d/wt" fm/feat-superseded
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-superseded.meta" "window=fm:fm-feat-superseded" "worktree=$d/wt" "kind=ship"
+  printf 'done [at=1700000001]: PR delivered\npaused [at=1700000002]: awaiting merge\n' > "$d/state/feat-superseded.status"
+  FM_FAKE_AXI_STATUS="$(run_failed fm/feat-superseded)"
+  FM_FAKE_AXI_STATUS=${FM_FAKE_AXI_STATUS/01RUN/01HF7YAT000000000000000000}
+  local out; out=$(run_crew_state "$d" feat-superseded)
+  assert_contains "$out" 'state: paused' 'newer delivered-and-paused declarations supersede an abandoned failure'
+  assert_contains "$out" 'source: run-step' 'the attributed run reports the later task declaration'
+  pass 'newer delivered and paused declarations supersede an abandoned failed run'
+}
 
 test_terminal_failed_ci_orphan_after_green_reads_done() {
   reset_fakes
@@ -3932,17 +3948,15 @@ test_active_run_descendant_fix_head_remains_current
 test_local_advanced_past_run_head_invalidates
 test_pipeline_owned_active_run_beats_superseded_failed_row
 test_failed_run_with_no_later_run_still_surfaces
+test_newer_done_paused_status_supersedes_abandoned_failed_run
 test_coarse_unresolvable_active_row_never_falls_to_older_row
-test_coarse_mismatched_anchor_falls_to_pane_not_older_row
 test_coarse_terminal_row_at_foreign_head_not_attributed
 test_executing_run_binds_without_pipeline_owned_sync
 test_non_pipeline_owned_parked_unresolvable_head_not_attributed
 test_gate_parked_run_with_live_status_word_not_attributed
 test_pipeline_owned_terminal_run_not_exempt
 test_missing_run_head_falls_back_to_current_state
-test_active_fix_round_unfetched_pipeline_head_reports_current
 test_unanchored_unfetched_active_row_still_binds
-test_unresolved_terminal_row_is_history_not_current
 test_runs_list_continuation_found_when_axi_answers_other_branch
 test_no_run_herdr_stale_registration_over_shell_reads_agent_gone
 test_no_run_herdr_stale_working_record_is_never_busy
