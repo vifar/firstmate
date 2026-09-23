@@ -254,6 +254,7 @@ fm_dod_block() {  # <mode> <task-id>
 # Definition of done
 Delivery contract: mode=direct-PR
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
+When this task is linked to a GitHub issue on its live backlog row, read the issue from the forge before reporting done and confirm it is closed and carries the configured verified label (\`FM_ISSUE_VERIFIED_LABEL\`, default \`verified\`). Never hand-tick or apply verification. If the issue is open, unreadable, or missing that label, append \`blocked [key=issue-finalization]: issue <exact URL>; <reason>\` and stop; do not claim completion or resolve the blocker until proof exists. Keep the reason current as you recheck; the exact issue URL and key identify this blocker.
 The task is complete only when committed on your branch.
 When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
@@ -290,6 +291,7 @@ When writing or changing tests, assert consumer-visible behavior through an exec
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
 When you believe it is complete, append \`done [at=<epoch>]: {summary}\` to the status file and stop.
+When this task is linked to a GitHub issue on its live backlog row, read the issue from the forge before reporting done and confirm it is closed and carries the configured verified label (\`FM_ISSUE_VERIFIED_LABEL\`, default \`verified\`). Never hand-tick or apply verification. If the issue is open, unreadable, or missing that label, append \`blocked [key=issue-finalization]: issue <exact URL>; <reason>\` and stop; do not claim completion or resolve the blocker until proof exists. Keep the reason current as you recheck; the exact issue URL and key identify this blocker.
 Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.

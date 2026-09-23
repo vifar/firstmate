@@ -357,6 +357,24 @@ test_pr_based_dod_requires_non_draft() {
   done
   pass "fm-brief.sh: PR-based done requires a non-draft PR; a deliberate draft declares a wait"
 }
+test_issue_finalization_dod_modes() {
+  local home brief mode
+  home="$TMP_ROOT/dod-home"
+  mkdir -p "$home/data"
+  for mode in no-mistakes direct-PR local-only; do
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "brief-issue-$mode" some-proj --mode "$mode" >/dev/null 2>&1
+    brief="$home/data/brief-issue-$mode/brief.md"
+    if [ "$mode" = local-only ]; then
+      assert_no_grep 'issue-finalization' "$brief" "$mode DOD must not require issue finalization on local-only work"
+      continue
+    fi
+    assert_grep 'FM_ISSUE_VERIFIED_LABEL' "$brief" "$mode DOD omitted configured issue verification label"
+    assert_grep 'default `verified`' "$brief" "$mode DOD omitted verified-label default"
+    assert_grep 'blocked [key=issue-finalization]' "$brief" "$mode DOD omitted stable issue blocker key"
+    assert_grep 'Keep the reason current as you recheck' "$brief" "$mode DOD omitted variable-reason guidance"
+  done
+  pass "fm-brief.sh: issue finalization applies only to PR delivery modes"
+}
 
 # Pin the specific line the bug lived on: the no-mistakes DOD's no-mistakes
 # reference must render as plain prose with no dangling apostrophe artifact.
@@ -1103,7 +1121,7 @@ test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
 test_pr_assignment_contract
 test_pr_based_dod_requires_non_draft
-test_ask_user_escalation_format
+test_issue_finalization_dod_modes
 test_ship_project_memory_wording
 test_herdr_lab_contract_is_explicit_and_complete
 test_herdr_lab_contract_quotes_foreign_firstmate_path
