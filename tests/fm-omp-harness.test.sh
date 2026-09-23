@@ -1000,6 +1000,7 @@ const seeded = [
   record(11, `signal: ${state}/parent-replies.status`),
   record(12, `signal: ${state}/_underscore-q1.turn-ended`),
   record(13, `signal: ${state}/-dash-q1.status`),
+  record(15, `signal: ${state}/live-signal-q1.turn-ended ${state}/orphan-q1.status`),
   record(14, "stale: default:wAB:p1"),
 ];
 writeFileSync(handoffPath, `${JSON.stringify({ version: 2, pending: seeded })}\n`);
@@ -1017,7 +1018,9 @@ if (sawAny("stale: default:w4Z:p2")) {
 if (sawAny("heartbeat: default:w9Z:p1")) throw new Error("a windowed heartbeat for a missing task was replayed");
 // Both dead state references, in each shape the guard resolves.
 if (sawAny("dead-signal-q1")) throw new Error("a signal close whose referenced files are gone was replayed");
-if (sawAny("orphan-q1.status")) throw new Error("a signal close whose task record was removed was replayed");
+if (replayed.some((text) => text.includes(`signal: ${state}/orphan-q1.status`) && !text.includes("live-signal-q1"))) {
+  throw new Error("a signal close whose task record was removed was replayed");
+}
 if (sawAny("dead-check-q1")) throw new Error("a check close for a task with no meta and no script was replayed");
 // Live work still gets through, each exactly once.
 for (const [needle, label] of [
@@ -1036,17 +1039,18 @@ for (const [needle, label] of [
   // and must deliver; requiring an alphanumeric first character dropped them.
   [`signal: ${state}/_underscore-q1.turn-ended`, "a signal close for a task id starting with underscore"],
   [`signal: ${state}/-dash-q1.status`, "a signal close for a task id starting with dash"],
+  [`signal: ${state}/live-signal-q1.turn-ended ${state}/orphan-q1.status`, "a coalesced signal close with live and torn-down tasks"],
   ["stale: default:wAB:p1", "a stale close for a window whose task id starts with dash"],
 ]) {
   const count = replayed.filter((text) => text.includes(needle)).length;
   if (count !== 1) throw new Error(`${label} must replay exactly once, saw ${count}: ${JSON.stringify(replayed)}`);
 }
-if (readHandoff().length !== 8) throw new Error(`dead closes must leave the store, saw ${readHandoff().length} records`);
+if (readHandoff().length !== 9) throw new Error(`live closes must remain pending consumption, saw ${readHandoff().length} records`);
 // Consuming a live replayed close removes exactly that record: a genuinely
 // pending close still replays once across a replacement and is not duplicated.
 const liveText = sent.find((wake) => wake.m.includes("live-signal-q1.turn-ended")).m;
 await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: liveText }, {});
-if (readHandoff().length !== 7) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
+if (readHandoff().length !== 8) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
 if (readHandoff().some((item) => item.message.includes("live-signal-q1"))) throw new Error("the consumed close rode the store again");
 await handlers.get("session_shutdown")({}, {});
 process.exit(0);
