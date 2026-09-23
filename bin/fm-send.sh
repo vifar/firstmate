@@ -719,7 +719,6 @@ fm_send_close_resolved_keys() { # <answer-text>
       return 1
       ;;
     esac
-    i=$((i + 1))
   done
 }
 
