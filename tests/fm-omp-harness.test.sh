@@ -1213,6 +1213,71 @@ EOF
   pass ".omp watch extension: a close that outlived its replacement window is retired instead of re-delivered, while live work still delivers"
 }
 
+
+test_watch_extension_retires_aged_unconsumed_close() {
+  local repo home out status
+  repo="$TMP_ROOT/unconsumed/repo"; home="$TMP_ROOT/unconsumed/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *--handling-delivered*) exit 0 ;; esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+if [ ! -e "${FM_HOME:?}/state/.unconsumed-fired" ]; then
+  : > "$FM_HOME/state/.unconsumed-fired"
+  printf 'signal: %s/state/unconsumed-q1.turn-ended\n' "$FM_HOME"
+  exit 0
+fi
+exec sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_OMP_HANDOFF_TTL_MS=1000 FM_OMP_UNCONSUMED_CLOSE_TTL_MS=100 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+const handoff = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
+mkdirSync(`${state}/extensions/omp-primary-watch`, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+writeFileSync(`${state}/unconsumed-q1.turn-ended`, "turn ended\n");
+writeFileSync(`${state}/unconsumed-q1.meta`, "window=default:w1B:p1\nharness=omp\n");
+const handlers = new Map(); let tool = null; const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool(t) { tool = t; },
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+await handlers.get("session_start")({ type: "session_start" }, {});
+await tool.execute();
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 6000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+await waitUntil(() => sent.some((wake) => wake.m.includes("unconsumed-q1")), "the accepted close");
+await waitUntil(() => {
+  try { return JSON.parse(readFileSync(handoff, "utf8")).pending.length === 0; }
+  catch { return false; }
+}, "the expired close to leave the handoff store");
+if (sent.filter((wake) => wake.m.includes("unconsumed-q1")).length !== 1) {
+  throw new Error(`the accepted close must not be re-delivered: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+}
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch unconsumed close expiry: $out"
+  [ -z "$out" ] || fail "omp watch unconsumed close expiry test printed output: $out"
+  pass ".omp watch extension: an accepted unconsumed close expires and is not replayed"
+}
+
 # A failure notice reports one continuity episode, so it is surfaced exactly
 # once. surfaceFailure sends without a pending close and therefore never reached
 # the consumption or liveness discipline that retires actionable wakes: with the
@@ -1334,4 +1399,5 @@ test_watch_extension_bounds_replacement_handoff
 test_watch_extension_gates_close_liveness
 test_watch_extension_gates_non_replacement_delivery
 test_watch_extension_retires_aged_retained_close
+test_watch_extension_retires_aged_unconsumed_close
 test_watch_extension_reports_failure_once_per_episode

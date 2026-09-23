@@ -122,6 +122,7 @@ type PendingActionableClose = {
   message: string;
   predecessorArmPid: string;
   delivered?: true;
+  deliveredAt?: number;
 };
 
 type ReplacementActionableHandoff = {
@@ -177,11 +178,10 @@ const actionableHandoff = `${handoffDir}/session-replacement-actionable.json`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
-const retryLimit = positiveInteger("FM_WATCH_REARM_RETRY_LIMIT", 5);
-// Replacement-handoff bounds (contract: "Replacement handoff lifetime" above).
-// The age bound is the same 10 minutes in production; it is overridable so a
-// regression can drive the bound with real elapsed time instead of waiting one
-// out, exactly as the rearm knobs above are.
+// A delivered close stays replayable while omp may still consume it, then expires
+// so an idle never-consumed follow-up cannot schedule supervision forever.
+const unconsumedCloseTtlMs = positiveInteger("FM_OMP_UNCONSUMED_CLOSE_TTL_MS", 60_000);
+// Replacement handoffs remain replayable across one short session replacement.
 const handoffTtlMs = positiveInteger("FM_OMP_HANDOFF_TTL_MS", 600_000);
 const handoffMaxPending = 32;
 // 35s on Windows so the budget stays above arm's MSYS confirm default (30s in
@@ -497,8 +497,12 @@ function handoffWorkIsLive(pending: PendingActionableClose): boolean {
 // predicate; the store's bounds and every delivery path apply it, so a record
 // that has aged past its replacement window is retired instead of replayed no
 // matter where it is being held.
+// Delivered but never-consumed closes have a shorter in-memory lifetime than
+// replacement handoffs: a replacement still applies the longer handoff bound.
 function retainedCloseIsEligible(pending: PendingActionableClose): boolean {
-  if (Date.now() - Number(pending.token.split("-")[1]) > handoffTtlMs) return false;
+  const age = Date.now() - Number(pending.token.split("-")[1]);
+  if (age > handoffTtlMs) return false;
+  if (pending.delivered && Date.now() - (pending.deliveredAt ?? Number(pending.token.split("-")[1])) > unconsumedCloseTtlMs) return false;
   return handoffWorkIsLive(pending);
 }
 
@@ -904,6 +908,7 @@ export default function (pi: ExtensionAPI) {
     owner.replacementActionables.delete(pending.token);
     const index = owner.pendingActionables.findIndex((item) => item.token === pending.token);
     if (index >= 0) owner.pendingActionables.splice(index, 1);
+    owner.unconsumedWakes.delete(pending.token);
     owner.cleanupFailure = "";
   }
 
@@ -922,7 +927,7 @@ export default function (pi: ExtensionAPI) {
     const timer = setTimeout(() => {
       if (owner.cleanupTimer === timer) owner.cleanupTimer = null;
       void processPendingActionables(owner);
-    }, retryDelay(1));
+    }, Math.max(retryDelay(1), unconsumedCloseTtlMs));
     timer.unref();
     owner.cleanupTimer = timer;
   }
@@ -933,16 +938,17 @@ export default function (pi: ExtensionAPI) {
     const attemptedCleanup = new Set<string>();
     try {
       while (generationIsLive(owner) && owner.pendingActionables.length > 0) {
-        for (const delivered of owner.pendingActionables.filter((item) => item.delivered && !attemptedCleanup.has(item.token))) {
-          attemptedCleanup.add(delivered.token);
+        for (const pending of [...owner.pendingActionables]) {
+          if (!pending.delivered || owner.unconsumedWakes.has(pending.token)) continue;
+          if (retainedCloseIsEligible(pending)) continue;
           try {
-            finishPendingActionable(owner, delivered);
+            finishPendingActionable(owner, pending);
           } catch (error) {
             surfaceCleanupFailure(owner, error);
           }
         }
-        // A record omp has accepted but not consumed is neither redelivered
-        // nor finished here: consumption finishes it, replacement replays it.
+        // An accepted but unconsumed close remains pending only while its work
+        // is live and its bounded replay window is open.
         const pending = owner.pendingActionables.find(
           (item) => !item.delivered && !owner.unconsumedWakes.has(item.token),
         );
@@ -1014,6 +1020,10 @@ export default function (pi: ExtensionAPI) {
             } catch (error) {
               surfaceCleanupFailure(owner, error);
             }
+          } else {
+            pending.delivered = true;
+            pending.deliveredAt = Date.now();
+            schedulePendingCleanup(owner);
           }
           releaseClaim();
         } catch (error) {
@@ -1190,7 +1200,7 @@ export default function (pi: ExtensionAPI) {
       FM_WATCH_ARM_SCRIPT: armScript,
       FM_WATCH_PREDECESSOR_ARM_PID: predecessorArmPid,
     };
-    const armChild = spawn("bash", ["-lc", "config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\" --restart"], {
+    const armChild = spawn("bash", ["-lc", "config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\""], {
       cwd: fmRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
