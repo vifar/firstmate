@@ -396,6 +396,7 @@ The worker reports the PR when CI first becomes green rather than waiting for me
 
 ### PR ready, landing, and teardown
 
+Before relaying a worker's PR-ready signal or presenting a merge decision, verify the assignee on GitHub PRs with `gh pr view <url> --json assignees`; discover the repository owner with `gh repo view --json owner` and assign it with `gh pr edit <url> --add-assignee <owner>` when missing. This applies to PRs opened by workers and by validation gates; a home may specify a preferred assignee in `data/captain.md`.
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done [at=<epoch>]: PR <url> checks green` after CI is green, while `direct-PR` reports `done [at=<epoch>]: PR <url>` after opening the PR, each only for a non-draft PR; a lane that deliberately holds a draft declares a wait instead, and `bin/fm-pr-check.sh` refuses to arm merge monitoring on a draft.
 Run `bin/fm-pr-check.sh <id> <PR url>` with the URL copied from that ready signal - it records `pr=` and the forge's `pr_head=` when available in the task's meta and arms the watcher's merge poll.
 Tell the captain the PR's full `https://...` URL copied from the worker's ready line or the task's `pr=` metadata, a concise outcome summary, and the no-mistakes risk level when applicable.
