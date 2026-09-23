@@ -2120,6 +2120,11 @@ case "$ARG3" in
   }
   ;;
 esac
+if [ "$HARNESS" = kimi ] && ! fm_backend_visible_capture_supported "$BACKEND"; then
+  echo "error: backend '$BACKEND' has no verified viewport-bounded capture; Kimi cannot launch without it" >&2
+  exit 1
+fi
+
 
 # muse, gemini, and agy are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.
