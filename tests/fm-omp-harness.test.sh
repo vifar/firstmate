@@ -167,6 +167,19 @@ run_scout_spawn() {  # <home> <wt> <fakebin> <launch-log> <spawn-args...>
   FM_FAKE_LAUNCH_LOG="$launchlog" fm_test_run_spawn "$home" "$wt" "$fakebin" "$@" --scout
 }
 
+test_spawn_unset_lavish_config_is_safe() (
+  local rec id=omp-lavish-unset-q0 out status
+  rec=$(make_spawn_case lavish-unset omp "$id")
+  read_case_record "$rec"
+  unset LAVISH_AXI_HOST_CONFIG_PRESENT
+  out=$(run_scout_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id=$PROJ_DIR" --harness omp)
+  status=$?
+  expect_code 0 "$status" "plain spawn without a Lavish host config should succeed"
+  assert_contains "$out" "spawned $id harness=omp" "spawn did not report the omp harness"
+  pass "spawn defaults an absent Lavish host config without a shell error"
+)
+
+
 test_spawn_launch_line_and_worker_wiring() {
   local rec id=omp-launch-q1 out status launch state
   rec=$(make_spawn_case launch omp "$id")
@@ -1386,6 +1399,7 @@ test_detection_anchored_name_and_marker_precedence
 test_omp_startup_binds_loaded_markers
 test_omp_markers_record_outer_omp_ancestor
 test_lock_identity_and_liveness_classification
+test_spawn_unset_lavish_config_is_safe
 test_spawn_launch_line_and_worker_wiring
 test_spawn_model_validation_scoped_to_listed_providers
 test_secondmate_launch_relies_on_discovery

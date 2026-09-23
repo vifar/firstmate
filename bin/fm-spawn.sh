@@ -512,6 +512,23 @@ case "$CLAUDE_PERMISSION_MODE" in
 auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
 *) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
 esac
+if ! LAVISH_AXI_HOST_CONFIG_PRESENT=$(fm_config_source_present "$CONFIG/lavish-axi-host"); then
+  exit 1
+fi
+LAVISH_AXI_HOST=
+if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
+  if [ ! -f "$CONFIG/lavish-axi-host" ] || [ ! -r "$CONFIG/lavish-axi-host" ]; then
+    echo "error: config/lavish-axi-host must be a readable regular file" >&2
+    exit 1
+  fi
+  LAVISH_AXI_HOST=$(cat "$CONFIG/lavish-axi-host")
+  case "$LAVISH_AXI_HOST" in
+  ''|*[[:space:][:cntrl:]]*)
+    echo "error: config/lavish-axi-host must contain one non-empty address without whitespace" >&2
+    exit 1
+    ;;
+  esac
+fi
 SUB_HOME_MARKER=".fm-secondmate-home"
 if [ -e "$STATE" ] || [ -L "$STATE" ]; then
   fm_backlog_directory_present "$STATE" "state directory" || {
