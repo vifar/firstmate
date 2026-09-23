@@ -411,6 +411,27 @@ test_no_mistakes_dod_wording() {
   pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose and bans --yes outright"
 }
 
+test_pr_assignment_contract() {
+  local home id brief
+  home="$TMP_ROOT/pr-assignment-home"
+  mkdir -p "$home/data"
+  for mode in direct-PR no-mistakes; do
+    id="brief-pr-assignment-$mode"
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode "$mode" >/dev/null 2>&1
+    brief="$home/data/$id/brief.md"
+    assert_grep 'gh repo view --json owner' "$brief" "$mode brief must discover the repository owner"
+    if [ "$mode" = direct-PR ]; then
+      assert_grep 'gh-axi pr create' "$brief" "direct-PR brief must use gh-axi to create the PR"
+      assert_grep --assignee "$brief" "direct-PR brief must assign the owner when creating the PR"
+    fi
+    assert_grep 'gh pr view' "$brief" "$mode brief must verify PR assignees"
+    assert_grep 'assignees' "$brief" "$mode brief must inspect the assignee list"
+    assert_grep 'gh pr edit' "$brief" "$mode brief must correct a missing PR assignee"
+    assert_grep 'add-assignee' "$brief" "$mode brief must add an assignee when missing"
+  done
+  pass "fm-brief.sh: PR delivery contracts assign and verify the repository owner"
+}
+
 test_ask_user_escalation_format() {
   local home id brief mode other_id other_brief
   home="$TMP_ROOT/ask-user-home"
@@ -851,6 +872,9 @@ test_pause_verb_override_renders_all_brief_scaffolds() {
     while IFS= read -r template; do
       [ -n "$template" ] || continue
       case "$template" in
+        *"[key="*) continue ;;
+      esac
+      case "$template" in
         'echo "'*) template=${template#echo \"}; template=${template%%\" >>*} ;;
       esac
       case "$template" in
@@ -1077,6 +1101,7 @@ test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
+test_pr_assignment_contract
 test_pr_based_dod_requires_non_draft
 test_ask_user_escalation_format
 test_ship_project_memory_wording

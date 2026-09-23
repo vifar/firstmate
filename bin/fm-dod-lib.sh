@@ -258,8 +258,10 @@ The task is complete only when committed on your branch.
 When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
-When it is implemented and committed, push your branch and open a PR with `gh-axi` that is ready for review, not a draft.
+When it is implemented and committed, discover the repository owner with \`gh repo view --json owner\`, then push your branch and open a ready-for-review PR with \`gh-axi pr create\` and its \`--assignee OWNER\` flag.
+Set \`PR_URL\` to the exact URL returned by \`gh-axi pr create\`, and set \`OWNER\` from \`gh repo view --json owner\`.
 Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.
+Verify the PR assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the captain's account is not assigned, correct it with \`gh pr edit "\$PR_URL" --add-assignee "\$OWNER"\` before reporting done.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
 Then report your completed PR with its full URL in the status file and stop.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
@@ -315,8 +317,9 @@ Two firstmate-specific rules layer on top of that guidance:
 - NEVER pass \`--yes\` (or \`-y\`) to \`no-mistakes axi run\` or \`no-mistakes axi respond\`. It is banned fleet-wide.
   It auto-resolves every gate including ask-user findings with no escalation, and answering your own ask-user finding is a hard rule violation.
 
+Set \`PR_URL\` to the exact URL returned by the pipeline, and set \`OWNER\` from \`gh repo view --json owner\`.
 After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.
-A draft cannot be merged, so a done report on one leaves the merge unasked.
+Verify its assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the captain's account is not assigned, discover the repository owner with \`gh repo view --json owner\` and correct it with \`gh pr edit "\$PR_URL" --add-assignee "\$OWNER"\` before reporting done.
 Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 EOF
