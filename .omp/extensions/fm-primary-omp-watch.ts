@@ -449,18 +449,19 @@ function signalWorkIsLive(line: string): boolean {
     .filter((path) => path.startsWith(`${state}/`));
   // A signal line with no state-scoped reference names nothing resolvable. Keep
   // it live rather than dropping it: production always writes state-scoped
-  // paths (bin/fm-watch.sh), so this is defensive only, and dropping an
-  // unresolvable close risks losing a real announcement, which is the worse
-  // failure of the two.
+  // paths (bin/fm-watch.sh), and dropping an unresolvable close risks losing a
+  // real announcement, which is the worse failure of the two.
   if (references.length === 0) return true;
-  for (const path of references) {
+  // A coalesced close is live if any referenced event still belongs to live
+  // work. Watcher queue rows carry one reference each; this also preserves a
+  // legacy/batched close when another task in the batch has been cleaned up.
+  return references.some((path) => {
     if (!existsSync(path)) return false;
     const relative = path.slice(state.length + 1);
-    if (homeScopedChannelLogs[relative]) continue;
+    if (homeScopedChannelLogs[relative]) return true;
     const suffix = path.endsWith(".turn-ended") ? ".turn-ended" : path.endsWith(".status") ? ".status" : "";
-    if (suffix && !metaExists(relative.slice(0, -suffix.length))) return false;
-  }
-  return true;
+    return !suffix || metaExists(relative.slice(0, -suffix.length));
+  });
 }
 
 function handoffWorkIsLive(pending: PendingActionableClose): boolean {
