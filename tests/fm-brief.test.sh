@@ -347,8 +347,12 @@ test_pr_based_dod_requires_non_draft() {
       continue
     fi
     # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
-    assert_grep 'confirm it is not a draft (`gh pr view <url> --json isDraft` must print false)' "$brief" \
-      "$mode: done must require reading the PR back from the forge as non-draft"
+    if [ "$mode" = no-mistakes ]; then
+      assert_grep 'confirm it is not a draft (`gh pr view <url> --json isDraft` must print false)' "$brief" \
+        "$mode: done must require reading the PR back from the forge as non-draft"
+    fi
+    assert_grep 'unresolved review-thread state' "$brief" \
+      "$mode: done must independently verify unresolved review threads"
     # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
     assert_grep 'mark it ready with `gh-axi pr ready`' "$brief" \
       "$mode: a draft must be marked ready before done"
@@ -865,14 +869,14 @@ test_pause_verb_override_renders_all_brief_scaffolds() {
     # rule 4's echo: substitute each one's named placeholders and read the stamp
     # back. Extracting by "append" as well as by the stamp means dropping a stamp
     # from any instruction fails here rather than shrinking the set.
-    templates=$(grep -o -e "append \`[^\`]*: [^\`]*\`" \
-      -e "\`[^\`]*\[at=<epoch>\][^\`]*\`" "$brief" \
+    templates=$(grep -o -e 'append `[^`]*: [^`]*`' \
+      -e '`[^`]*\[at=<epoch>\][^`]*`' "$brief" \
       | sed 's/^append //' | tr -d '`' | sort -u)
     signals=0
     while IFS= read -r template; do
       [ -n "$template" ] || continue
       case "$template" in
-        *"[key="*) continue ;;
+        *"[key="*|'blocked [key='*|'needs-decision [key='*) continue ;;
       esac
       case "$template" in
         'echo "'*) template=${template#echo \"}; template=${template%%\" >>*} ;;

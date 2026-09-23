@@ -1,27 +1,19 @@
 #!/usr/bin/env bash
-# Report the blockers this command can see on one GitHub pull request.
+# Report a complete current GitHub pull-request check inventory and blockers.
 #
 # This is a one-shot, read-only command. It reads the current pull request,
-# reported checks, submitted reviews, and review decision from GitHub at
-# invocation time. It never posts, requests, approves, or merges.
-# It reports on checks that have reported. A required context that has never
-# reported on this head is absent from what this command reads and cannot be
-# enumerated here. Empty output therefore means that no reported required check
-# is failing or pending; it does not mean the pull request is ready to merge.
-# When nothing has reported, or nothing required has, that is printed rather
-# than read as ready. Advisory checks do not block and are omitted.
-# A pull request that only awaits an approval (reviewDecision REVIEW_REQUIRED)
-# is not reported as blocked. GitHub's reviewDecision owns whether reviews
-# block; review history is printed only to explain CHANGES_REQUESTED, naming
-# each reviewer whose latest verdict still requests changes and marking it
-# STALE when it was left at a superseded head.
+# complete status-check rollup, submitted reviews, review decision, and review
+# threads from GitHub at invocation time. It never posts, requests, approves,
+# or merges.
+# Every rollup entry is enumerated; the summary counts pass, fail, pending, and
+# skipped entries separately. An absent required context cannot be enumerated.
+# Review-thread pagination is complete before output; unresolved threads are
+# listed by node id and URL. Lookup or malformed-data errors exit nonzero.
 # A closed or merged pull request reports that terminal state and nothing else.
-# Unresolved review-thread state is out of this command's scope.
 #
 # Usage: fm-pr-state.sh <pr-url>
-#   Prints one line per blocker it can see and nothing when it sees none.
-#   Blockers do not change the successful exit status; lookup or usage refusal
-#   exits non-zero.
+#   Prints the check inventory, unresolved review threads, and blockers.
+#   Lookup or usage refusal exits nonzero.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,14 +47,15 @@ NUMBER=$FM_PR_NUMBER
 ENDPOINT="/repos/$PATH_PART/pulls/$NUMBER"
 
 CORE=$(gh pr view "$URL" \
-  --json state,mergedAt,isDraft,headRefOid,author,mergeable,reviewDecision --jq '
+  --json state,mergedAt,isDraft,headRefOid,author,mergeable,reviewDecision,statusCheckRollup --jq '
   "state=\(.state | ascii_downcase)",
   "merged_at=\(.mergedAt // "")",
   "draft=\(.isDraft)",
   "head=\(.headRefOid)",
   "author=\(.author.login)",
   "mergeability=\(if .mergeable == null or .mergeable == "UNKNOWN" then "unknown" else (.mergeable | ascii_downcase) end)",
-  "review_decision=\(.reviewDecision // "")"') || die "could not read $URL"
+  "review_decision=\(.reviewDecision // "")",
+  "checks=\(.statusCheckRollup | if type == "array" then tojson else error("missing check rollup") end)"') || die "could not read $URL"
 
 STATE=
 MERGED_AT=
@@ -71,6 +64,7 @@ MERGEABILITY=
 HEAD=
 AUTHOR=
 REVIEW_DECISION=
+CHECKS=
 while IFS= read -r row; do
   case "$row" in
     state=*) STATE=${row#state=} ;;
@@ -80,12 +74,13 @@ while IFS= read -r row; do
     author=*) AUTHOR=${row#author=} ;;
     mergeability=*) MERGEABILITY=${row#mergeability=} ;;
     review_decision=*) REVIEW_DECISION=${row#review_decision=} ;;
+    checks=*) CHECKS=${row#checks=} ;;
   esac
 done <<EOF_CORE
 $CORE
 EOF_CORE
 [ -n "$STATE" ] && [ -n "$DRAFT" ] && [ -n "$HEAD" ] && [ -n "$AUTHOR" ] \
-  && [ -n "$MERGEABILITY" ] \
+  && [ -n "$MERGEABILITY" ] && [ -n "$CHECKS" ] \
   || die "GitHub returned incomplete pull-request state for $URL"
 
 if [ -n "$MERGED_AT" ]; then
@@ -103,28 +98,28 @@ case "$MERGEABILITY" in
   *) die "GitHub returned invalid mergeability for $URL" ;;
 esac
 
-GH_STDERR=$(mktemp "${TMPDIR:-/tmp}/fm-pr-state.XXXXXX") \
-  || die "could not create temporary file"
-trap 'rm -f "$GH_STDERR"' EXIT INT TERM
-if ! REQUIRED=$(gh pr checks "$URL" --required --json name,state,bucket --jq '
-  .[]
-  | select(.bucket != "pass" and .bucket != "skipping")
-  | "REQUIRED CHECK: \(.name) (\(.state))"' 2>"$GH_STDERR"); then
-  # These two sentences are gh's own human-readable error text, verified against
-  # gh 2.100.0 on 2026-09-12. gh reports "nothing reported" as an error rather
-  # than as structured data, so matching its text is the only way to tell that
-  # apart from a real lookup failure. An unrecognised message falls through to
-  # the refusal below, so a reword degrades loudly rather than silently.
-  if grep -q "^no checks reported on the '" "$GH_STDERR"; then
-    REQUIRED="CHECKS: none reported yet"
-  elif grep -q "^no required checks reported on the '" "$GH_STDERR"; then
-    REQUIRED="CHECKS: no required check has reported; readiness unconfirmed"
-  else
-    cat "$GH_STDERR" >&2
-    die "could not read required checks for $URL"
-  fi
-fi
-[ -z "$REQUIRED" ] || printf '%s\n' "$REQUIRED"
+printf '%s\n' "$CHECKS" | jq -e 'type == "array" and all(.[]; type == "object" and has("__typename"))' >/dev/null \
+  || die "GitHub returned malformed check rollup for $URL"
+printf '%s\n' "$CHECKS" | jq -r '
+  def pass: if .__typename == "CheckRun" then .status == "COMPLETED" and (.conclusion == "SUCCESS" or .conclusion == "NEUTRAL" or .conclusion == "SKIPPED") else .state == "SUCCESS" end;
+  def pending: if .__typename == "CheckRun" then .status != "COMPLETED" else .state == "PENDING" end;
+  def check_label: if .__typename == "CheckRun" then (.name // "(unnamed check run)") else (.context // "(unnamed status context)") end;
+  . as $all | [$all[] | select(pass)] as $passed
+  | [$all[] | select(pending)] as $waiting
+  | [$all[] | select((pass or pending) | not)] as $failed
+  | "CHECK SUMMARY: total=\($all|length) pass=\($passed|length) fail=\($failed|length) pending=\($waiting|length)"
+  , ($all[] | "CHECK: \(check_label) status=\(if .__typename == "CheckRun" then .status + "/" + (.conclusion // "") else .state end)")'
+
+# shellcheck disable=SC2016
+THREADS=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved url} pageInfo{hasNextPage endCursor}}}}}' \
+  -f owner="${PATH_PART%%/*}" -f name="${PATH_PART#*/}" -F number="$NUMBER" --paginate --slurp) \
+  || die "could not read review threads for $URL"
+printf '%s\n' "$THREADS" | jq -e 'type == "array" and all(.[]; .data.repository.pullRequest.reviewThreads.nodes | type == "array")' >/dev/null \
+  || die "GitHub returned malformed review threads for $URL"
+printf '%s\n' "$THREADS" | jq -r '
+  [ .[] | .data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id:(.id // ""), url:(.url // "")} ] as $open
+  | "REVIEW THREADS: unresolved=\($open|length)"
+  , ($open[] | "UNRESOLVED THREAD: id=\(.id) url=\(.url)")'
 
 if [ "$REVIEW_DECISION" = CHANGES_REQUESTED ]; then
   printf 'REVIEW DECISION: CHANGES_REQUESTED\n'
@@ -135,19 +130,13 @@ if [ "$REVIEW_DECISION" = CHANGES_REQUESTED ]; then
     | @tsv') || die "could not read reviews for $URL"
   printf '%s\n' "$REVIEWS" | awk -F '\t' -v author="$AUTHOR" -v head="$HEAD" '
     NF == 4 && $1 != author && $2 != "COMMENTED" && (!seen[$1] || $4 >= latest[$1]) {
-      seen[$1] = 1
-      latest[$1] = $4
-      state[$1] = $2
-      commit[$1] = $3
+      seen[$1] = 1; latest[$1] = $4; state[$1] = $2; commit[$1] = $3
     }
     END {
       for (reviewer in state) {
         if (state[reviewer] != "CHANGES_REQUESTED") continue
-        if (commit[reviewer] == head)
-          printf "REVIEW: %s CHANGES_REQUESTED\n", reviewer
-        else
-          printf "STALE BLOCKING REVIEW: %s CHANGES_REQUESTED at %s\n", \
-            reviewer, commit[reviewer]
+        if (commit[reviewer] == head) printf "REVIEW: %s CHANGES_REQUESTED\n", reviewer
+        else printf "STALE BLOCKING REVIEW: %s CHANGES_REQUESTED at %s\n", reviewer, commit[reviewer]
       }
     }' | LC_ALL=C sort
 fi

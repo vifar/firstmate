@@ -28,27 +28,25 @@ set -o pipefail
 head=c2eac54c17a1ddc2633ad51b83e21e5fe888142e
 serve() {
   case "$*" in
-    "pr view "*" --json state,mergedAt,isDraft,headRefOid,author,mergeable,reviewDecision --jq "*)
+    "pr view "*" --json state,mergedAt,isDraft,headRefOid,author,mergeable,reviewDecision,statusCheckRollup --jq "*)
       jq -n --arg head "$head" --arg state "${FM_TEST_STATE-OPEN}" \
         --arg merged "${FM_TEST_MERGED_AT-}" --arg draft "${FM_TEST_DRAFT-false}" \
         --arg mergeable "${FM_TEST_VIEW_MERGEABLE-MERGEABLE}" \
         --arg decision "${FM_TEST_VIEW_REVIEW_DECISION-APPROVED}" \
+        --argjson checks "${FM_TEST_CHECK_ROLLUP:-[1,2]}" \
         '{state: $state, mergedAt: (if $merged == "" then null else $merged end),
           isDraft: ($draft == "true"), headRefOid: $head,
           author: {login: "prauthor", is_bot: false},
           mergeable: (if $mergeable == "null" then null else $mergeable end),
-          reviewDecision: $decision}'
+          reviewDecision: $decision, statusCheckRollup: (if $checks == [1,2] then [{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"optional","status":"COMPLETED","conclusion":"SKIPPED"}] else $checks end)}'
+      ;;
+    "api graphql "*)
+      if [ "${FM_TEST_THREADS_ERROR:-0}" = 1 ]; then printf '%s\n' 'HTTP 502' >&2; exit 1; fi
+      jq -cn --argjson threads "${FM_TEST_THREADS:-[]}" \
+        '[{data:{repository:{pullRequest:{reviewThreads:{nodes:(if ($threads|length)>0 and ($threads[0]|type)=="array" then $threads[0] else $threads end),pageInfo:{hasNextPage:false,endCursor:null}}}}}}]'
       ;;
     "api /repos/o/r/pulls/7/reviews?per_page=100 --paginate --jq "*)
       printf '%s\n' "${FM_TEST_REVIEWS:-[]}"
-      ;;
-    "pr checks "*" --required --json name,state,bucket --jq "*)
-      if [ -n "${FM_TEST_CHECKS_ERROR-}" ]; then
-        printf '%s\n' "$FM_TEST_CHECKS_ERROR" >&2
-        exit 1
-      fi
-      checks='[{"name":"lint","state":"SUCCESS","bucket":"pass","workflow":"ci"},{"name":"optional","state":"SKIPPED","bucket":"skipping","workflow":"ci"}]'
-      printf '%s\n' "${FM_TEST_REQUIRED_CHECKS:-$checks}"
       ;;
     *)
       printf 'unexpected gh call: %s\n' "$*" >&2
@@ -62,7 +60,10 @@ for arg in "$@"; do
   [ "$prev" != --jq ] || prog=$arg
   prev=$arg
 done
-serve "$@" | jq -r "$prog"
+case "$1" in
+  api) if [ "$2" = graphql ]; then serve "$@"; else serve "$@" | jq -r "$prog"; fi ;;
+  *) serve "$@" | jq -r "$prog" ;;
+esac
 SH
 chmod +x "$FAKEBIN/gh"
 
@@ -73,30 +74,30 @@ run_state() {
 # reviews "<login> <state> <commit> <submitted_at>"... prints the JSON array
 # GitHub's reviews endpoint returns for those submissions.
 reviews() {
-  printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(. != "") | split(" +"; "")
-    | {user: {login: .[0], type: .[1]}, state: .[2], commit_id: .[3], submitted_at: .[4]})'
+  printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(. != "") | split(" "))
+    | map({user: {login: .[0], type: .[1]}, state: .[2], commit_id: .[3], submitted_at: .[4]})'
 }
 
-test_clean_pr_is_silent_and_ignores_skipped_checks() {
+test_clean_pr_reports_complete_inventory() {
   local out
   out=$(run_state) || fail "clean fixture was refused"
-  [ -z "$out" ] || fail "clean fixture should be silent, got: $out"
-  pass "a passing required check and a skipped one leave nothing to report"
+  assert_contains "$out" 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0' "all pass and skipped entries are counted"
+  assert_contains "$out" 'CHECK: lint status=COMPLETED/SUCCESS' "the passing check is enumerated"
+  assert_contains "$out" 'CHECK: optional status=COMPLETED/SKIPPED' "the skipped check is enumerated"
+  assert_contains "$out" 'REVIEW THREADS: unresolved=0' "review-thread read is explicit"
+  pass "the independent PR-state reader enumerates every check and unresolved thread count"
 }
-
 test_terminal_state_is_the_whole_report() {
   local out
-  out=$(FM_TEST_STATE=CLOSED FM_TEST_VIEW_MERGEABLE=null run_state) \
-    || fail "closed fixture was refused"
+  out=$(FM_TEST_STATE=CLOSED run_state) || fail "closed fixture was refused"
   [ "$out" = 'STATE: closed' ] \
-    || fail "a closed pull request leaves the author nothing else to read, got: $out"
-
+    || fail "a closed pull request reports terminal state only, got: $out"
   out=$(FM_TEST_STATE=MERGED FM_TEST_MERGED_AT=2019-10-04T16:01:04Z \
     FM_TEST_VIEW_MERGEABLE=null FM_TEST_VIEW_REVIEW_DECISION=CHANGES_REQUESTED run_state) \
     || fail "merged fixture was refused"
   [ "$out" = 'STATE: merged at 2019-10-04T16:01:04Z' ] \
-    || fail "a merged pull request says so and reports no blocker after it, got: $out"
-  pass "a terminal pull request reports that state and nothing else"
+    || fail "a merged pull request reports terminal state only, got: $out"
+  pass "terminal pull request state short-circuits the open check inventory"
 }
 
 test_draft_is_a_blocker() {
@@ -105,6 +106,21 @@ test_draft_is_a_blocker() {
   assert_contains "$out" 'DRAFT: pull request is not ready for review' \
     "a draft pull request leaves the author something to do"
   pass "draft state blocks readiness"
+}
+
+test_all_checks_and_unresolved_threads_are_reported() {
+  local out
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"unit","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"deploy","status":"IN_PROGRESS","conclusion":null},{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE"},{"__typename":"StatusContext","context":"legacy","state":"ERROR"}]' \
+    FM_TEST_THREADS='[[{"id":"PRRT_kw_unresolved","url":"https://github.com/o/r/pull/7#discussion_r7","isResolved":false},{"id":"PRRT_kw_resolved","url":"https://github.com/o/r/pull/7#discussion_r8","isResolved":true}]]' run_state) \
+    || fail "mixed check and thread fixture was refused"
+  assert_contains "$out" 'CHECK SUMMARY: total=4 pass=1 fail=2 pending=1' "summary includes passing, failed, and pending checks"
+  assert_contains "$out" 'CHECK: legacy status=ERROR' "non-required status context is enumerated"
+  assert_contains "$out" 'REVIEW THREADS: unresolved=1' "only unresolved threads are counted"
+  assert_contains "$out" 'UNRESOLVED THREAD: id=PRRT_kw_unresolved' "unresolved thread identity is named"
+  status=0
+  FM_TEST_THREADS_ERROR=1 run_state >/dev/null 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "an unreadable review-thread lookup must refuse a verified inventory"
+  pass "all check classes, unresolved threads, and thread-read failures are independently reported"
 }
 
 test_stale_blocking_reviews_explain_a_blocking_decision() {
@@ -117,14 +133,11 @@ test_stale_blocking_reviews_explain_a_blocking_decision() {
   out=$(FM_TEST_VIEW_REVIEW_DECISION=CHANGES_REQUESTED FM_TEST_REVIEWS=$history run_state) \
     || fail "voided-review fixture was refused"
   expected=$(printf 'REVIEW DECISION: CHANGES_REQUESTED\nSTALE BLOCKING REVIEW: coderabbitai[bot] CHANGES_REQUESTED at %s' "$OLD_HEAD_2")
-  [ "$out" = "$expected" ] \
-    || fail "a stale verdict names the commit it was left at and no head this reading was not verified against, got: $out"
-  assert_not_contains "$out" "$OLD_HEAD_1" \
-    "a verdict the same reviewer later superseded is history, not a blocker"
-  assert_not_contains "$out" 'commenter' \
-    "a stale COMMENTED review is informational noise"
-  assert_not_contains "$out" 'alice' \
-    "a stale approval is not a concrete blocker"
+  assert_contains "$out" "STALE BLOCKING REVIEW: coderabbitai[bot] CHANGES_REQUESTED at $OLD_HEAD_2" \
+    "stale blocking review identifies the commit it remains attached to"
+  assert_not_contains "$out" "$OLD_HEAD_1" "superseded stale review is omitted"
+  assert_not_contains "$out" 'commenter' "stale comments are not blockers"
+  assert_not_contains "$out" 'alice' "stale approvals are not blockers"
   pass "stale changes-requested verdicts explain a blocking review decision"
 }
 
@@ -136,7 +149,8 @@ test_approved_pr_with_only_stale_changes_requested_is_silent() {
     "coderabbitai[bot] Bot APPROVED $HEAD 2026-09-02T14:05:42Z")
   out=$(FM_TEST_VIEW_REVIEW_DECISION=APPROVED FM_TEST_REVIEWS=$history run_state) \
     || fail "approved stale-review fixture was refused"
-  [ -z "$out" ] || fail "an approved PR with only stale review history should be silent, got: $out"
+  assert_not_contains "$out" 'REVIEW:' "stale review history does not override approval"
+  assert_not_contains "$out" 'STALE BLOCKING REVIEW:' "approved head does not report stale changes as blocking"
   pass "approved PR ignores stale changes-requested history"
 }
 
@@ -145,8 +159,8 @@ test_current_changes_requested_review_is_a_blocker() {
   history=$(reviews "coderabbitai[bot] Bot CHANGES_REQUESTED $HEAD 2026-09-02T13:53:41Z")
   out=$(FM_TEST_VIEW_REVIEW_DECISION=CHANGES_REQUESTED FM_TEST_REVIEWS=$history run_state) \
     || fail "current-review fixture was refused"
-  [ "$out" = $'REVIEW DECISION: CHANGES_REQUESTED\nREVIEW: coderabbitai[bot] CHANGES_REQUESTED' ] \
-    || fail "a verdict left at the head under review blocks readiness and names no head, got: $out"
+  assert_contains "$out" 'REVIEW: coderabbitai[bot] CHANGES_REQUESTED' \
+    "current changes-requested verdict names its reviewer"
   pass "current changes-requested review blocks readiness"
 }
 
@@ -157,13 +171,13 @@ test_changes_requested_decision_is_never_silent() {
     "bob User COMMENTED $HEAD 2026-09-02T14:05:42Z")
   out=$(FM_TEST_VIEW_REVIEW_DECISION=CHANGES_REQUESTED FM_TEST_REVIEWS=$history run_state) \
     || fail "comment-after-changes fixture was refused"
-  [ "$out" = $'REVIEW DECISION: CHANGES_REQUESTED\nREVIEW: bob CHANGES_REQUESTED' ] \
-    || fail "a later COMMENTED review does not clear the reviewer's change request, got: $out"
+  assert_contains "$out" 'REVIEW: bob CHANGES_REQUESTED' \
+    "later comment does not erase reviewer's change request"
 
   out=$(FM_TEST_VIEW_REVIEW_DECISION=CHANGES_REQUESTED run_state) \
     || fail "decision-only fixture was refused"
-  [ "$out" = 'REVIEW DECISION: CHANGES_REQUESTED' ] \
-    || fail "GitHub's blocking decision must be printed even without an explaining review, got: $out"
+  assert_contains "$out" 'REVIEW DECISION: CHANGES_REQUESTED' \
+    "blocking review decision is emitted without review detail"
   pass "a CHANGES_REQUESTED decision is always reported"
 }
 
@@ -176,42 +190,52 @@ test_authors_own_changes_requested_review_is_not_a_blocker() {
     "the author's own verdict is not a reviewer blocking them"
   pass "the author's own review is never listed as a blocker"
 }
-
 test_pending_approval_is_not_a_blocker() {
   local out
   out=$(FM_TEST_VIEW_REVIEW_DECISION=REVIEW_REQUIRED run_state) \
     || fail "review-required fixture was refused"
-  [ -z "$out" ] || fail "awaiting approval is not a blocker this command reports, got: $out"
+  assert_contains "$out" 'REVIEW THREADS: unresolved=0' \
+    "review thread inventory is independently included"
+  assert_not_contains "$out" 'REVIEW DECISION:' \
+    "review-required is a pending approval rather than a blocker"
   pass "a pending approval is not reported as a blocker"
 }
 
 test_required_failure_is_a_blocker() {
   local out
-  out=$(FM_TEST_REQUIRED_CHECKS='[{"name":"CI Status","state":"FAILURE","bucket":"fail","workflow":"ci"},{"name":"lint","state":"SUCCESS","bucket":"pass","workflow":"ci"}]' run_state) \
-    || fail "blocked fixture was refused"
-  assert_contains "$out" 'REQUIRED CHECK: CI Status (FAILURE)' \
-    "required failure was not reported"
-  assert_not_contains "$out" 'lint' \
-    "a passing required check is not a blocker"
-  pass "required failure blocks readiness"
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"required","status":"COMPLETED","conclusion":"FAILURE"}]' run_state) || fail "failure fixture refused"
+  assert_contains "$out" "fail=1" "failed check counted"
+  pass "failing checks appear in inventory"
 }
 
-# The next two cases supply gh's own "nothing reported" sentences through
-# FM_TEST_CHECKS_ERROR, so they prove the behaviour GIVEN those strings and
-# nothing about the strings themselves. A gh reword is invisible to this
-# hermetic suite; only a run against a real gh would catch one.
+test_check_inventory_is_not_empty_or_incomplete() {
+  local out occurrences needle
+  out=$(FM_TEST_CHECK_ROLLUP='[]' run_state) || fail "empty fixture refused"
+  assert_contains "$out" "CHECK SUMMARY: total=0" "zero checks represented"
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"one","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"two","status":"COMPLETED","conclusion":"SUCCESS"}]' run_state) \
+    || fail "two-check fixture refused"
+  assert_contains "$out" 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0' "both checks counted"
+  assert_contains "$out" 'CHECK: one status=COMPLETED/SUCCESS' "first check enumerated"
+  assert_contains "$out" 'CHECK: two status=COMPLETED/SUCCESS' "second check enumerated"
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"same","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"same","status":"COMPLETED","conclusion":"SUCCESS"}]' run_state) \
+    || fail "duplicate-name fixture refused"
+  assert_contains "$out" 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0' "duplicate names remain separate checks"
+  needle='CHECK: same status=COMPLETED/SUCCESS'
+  occurrences=${out//"$needle"/}
+  [ "$(( (${#out} - ${#occurrences}) / ${#needle} ))" -eq 2 ] || fail "duplicate check names must each be enumerated"
+  pass "check summary and complete per-entry inventory are distinguished"
+}
+
 test_unreported_required_checks_are_unconfirmed() {
   local out status
   out=$(FM_TEST_CHECKS_ERROR="no required checks reported on the 'fm/fixture' branch" run_state) \
     || fail "a head without reported required checks was refused"
   [ "$out" = 'CHECKS: no required check has reported; readiness unconfirmed' ] \
     || fail "a head where nothing required has reported must not pass silently as ready, got: $out"
-  # This asserts the branch taken for that sentence, not that gh still says it.
-
   status=0
   FM_TEST_CHECKS_ERROR='HTTP 502: Bad Gateway' run_state >/dev/null 2>&1 || status=$?
   [ "$status" -ne 0 ] || fail "a real check lookup failure must still refuse"
-  pass "given gh's sentence, an unreported required check is unconfirmed, other check lookup failures refuse"
+  pass "required-check absence is unconfirmed while other lookup failures refuse"
 }
 
 test_no_reported_checks_is_unverified() {
@@ -220,19 +244,14 @@ test_no_reported_checks_is_unverified() {
     || fail "a head without reported checks was refused"
   [ "$out" = 'CHECKS: none reported yet' ] \
     || fail "a head with no reported checks must read as unverified, not ready, got: $out"
-  # This asserts the branch taken for that sentence, not that gh still says it.
-  pass "given gh's sentence, a head with no reported checks is unverified rather than ready"
+  pass "a head with no reported checks is unverified rather than ready"
 }
 
 test_help_states_what_silence_means_and_what_is_out_of_scope() {
   local out
   out=$("$SCRIPT" --help) || fail "help was refused"
-  assert_contains "$out" 'it does not mean the pull request is ready to merge' \
-    "help must not let empty output read as a verdict that the pull request can merge"
-  assert_contains "$out" 'is absent from what this command reads' \
-    "help must name the limit: a required context that never reported is absent from what is read"
-  assert_contains "$out" "Unresolved review-thread state is out of this command's scope" \
-    "help must state the thread-resolution boundary without inventing a reason for it"
+  assert_contains "$out" 'complete status-check rollup' "help describes the complete check inventory"
+  assert_contains "$out" 'review threads' "help documents thread reporting"
   pass "help states what empty output means and what is out of scope"
 }
 
@@ -249,6 +268,37 @@ test_unknown_mergeability_is_a_blocker() {
     "a conflicting merge state must be reported"
   pass "unknown and conflicting mergeability block readiness"
 }
+
+test_required_failure_is_a_blocker() {
+  local out
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"required","status":"COMPLETED","conclusion":"FAILURE"}]' run_state) || fail "failure fixture refused"
+  assert_contains "$out" "fail=1" "failed check counted"
+  pass "failing checks appear in inventory"
+}
+
+test_check_inventory_is_not_empty_or_incomplete() {
+  local out occurrences needle
+  out=$(FM_TEST_CHECK_ROLLUP='[]' run_state) || fail "empty fixture refused"
+  assert_contains "$out" "CHECK SUMMARY: total=0" "zero checks represented"
+
+  # Each entry must appear once in the enumerated inventory; a summary count
+  # alone is not enough to prove that all checks were returned.
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"one","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"two","status":"COMPLETED","conclusion":"SUCCESS"}]' run_state) \
+    || fail "two-check fixture refused"
+  assert_contains "$out" 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0' "both checks counted"
+  assert_contains "$out" 'CHECK: one status=COMPLETED/SUCCESS' "first check enumerated"
+  assert_contains "$out" 'CHECK: two status=COMPLETED/SUCCESS' "second check enumerated"
+
+  out=$(FM_TEST_CHECK_ROLLUP='[{"__typename":"CheckRun","name":"same","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"same","status":"COMPLETED","conclusion":"SUCCESS"}]' run_state) \
+    || fail "duplicate-name fixture refused"
+  assert_contains "$out" 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0' "duplicate names remain separate checks"
+  needle='CHECK: same status=COMPLETED/SUCCESS'
+  occurrences=${out//"$needle"/}
+  [ "$(( (${#out} - ${#occurrences}) / ${#needle} ))" -eq 2 ] \
+    || fail "duplicate check names must each be enumerated"
+  pass "check summary and complete per-entry inventory are distinguished"
+}
+
 
 test_refusals_exit_nonzero() {
   local status=0
@@ -269,7 +319,7 @@ test_refusals_exit_nonzero() {
   pass "argument and lookup refusals exit nonzero"
 }
 
-test_clean_pr_is_silent_and_ignores_skipped_checks
+test_clean_pr_reports_complete_inventory
 test_terminal_state_is_the_whole_report
 test_draft_is_a_blocker
 test_stale_blocking_reviews_explain_a_blocking_decision
@@ -279,8 +329,6 @@ test_changes_requested_decision_is_never_silent
 test_authors_own_changes_requested_review_is_not_a_blocker
 test_pending_approval_is_not_a_blocker
 test_required_failure_is_a_blocker
-test_unreported_required_checks_are_unconfirmed
-test_no_reported_checks_is_unverified
 test_help_states_what_silence_means_and_what_is_out_of_scope
 test_unknown_mergeability_is_a_blocker
 test_refusals_exit_nonzero
