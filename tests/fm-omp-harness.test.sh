@@ -124,8 +124,8 @@ test_lock_identity_and_liveness_classification() {
 
 # --- 2. Launch ---------------------------------------------------------------
 
-# A fake omp that answers `models --json` with a two-provider catalog and exits
-# 0 for everything else (the launch itself is only recorded by the fake tmux).
+# A fake omp that answers `models --json` and leaves a caller-controlled
+# readiness event for the post-launch gate.
 make_fake_omp() {  # <fakebin>
   cat > "$1/omp" <<'SH'
 #!/usr/bin/env bash
@@ -150,7 +150,9 @@ make_spawn_case() {  # <name> <harness> <id>
   fm_test_spawn_home "$home" "$harness"
   fm_git_worktree "$proj" "$wt" "wt-$name"
   fm_test_spawn_brief "$home" "$id"
-  : > "$case_dir/launch.log"
+  if [ "$name" != never-ready ]; then
+    printf 'v1 gen=%s seq=2 state=busy source=omp-ext event=agent_start ts=%s\n' "$(cat "$home/state/$id.busy-gen")" "$(date +%s)" > "$home/state/$id.busy-state"
+  fi
   printf '%s\n' "$case_dir|$home|$proj|$wt|$fakebin|$case_dir/launch.log"
 }
 
@@ -307,6 +309,22 @@ test_secondmate_config_pinned_model_is_validated() {
   assert_absent "$world/home/state/sm.meta" "a refused secondmate spawn must publish no sm.meta"
   [ ! -s "$launchlog" ] || fail "a refused secondmate spawn must record no launch: $(cat "$launchlog")"
   pass "fm-spawn: the config/secondmate-harness model pin is validated against the omp catalog before launch"
+}
+
+test_spawn_omp_never_ready_fails_within_bound() {
+  local rec id=omp-never-ready-q1 out status start elapsed
+  rec=$(make_spawn_case never-ready omp "$id")
+  read_case_record "$rec"
+  start=$(date +%s)
+  out=$(FM_OMP_READY_TIMEOUT_SECS=2 run_scout_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness omp 2>&1)
+  status=$?
+  elapsed=$(( $(date +%s) - start ))
+  expect_code 1 "$status" "an omp launch with no agent_start must fail: $out"
+  assert_contains "$out" "omp did not start processing its brief within 2s" "failure did not explain the bounded readiness timeout"
+  assert_absent "$HOME_DIR/state/$id.meta" "a failed fresh spawn must roll back its task record"
+  assert_absent "$HOME_DIR/state/$id.status" "a rolled-back fresh spawn leaves no status line, because its record is gone"
+  [ "$elapsed" -le 8 ] || fail "the two-second readiness timeout exceeded its eight-second test ceiling (${elapsed}s)"
+  pass "fm-spawn: omp never-ready launches fail within the explicit bound and roll back cleanly"
 }
 
 # --- 3. Busy state -------------------------------------------------------------
@@ -1419,3 +1437,4 @@ test_watch_extension_gates_non_replacement_delivery
 test_watch_extension_retires_aged_retained_close
 test_watch_extension_retires_aged_unconsumed_close
 test_watch_extension_reports_failure_once_per_episode
+test_spawn_omp_never_ready_fails_within_bound
