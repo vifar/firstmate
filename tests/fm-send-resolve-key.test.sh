@@ -152,6 +152,24 @@ test_answer_send_closes_open_decision() {
   pass "fm-send --resolve-key: the answer send itself closes the open decision"
 }
 
+test_answer_close_exits_successfully() {
+  local dir fb log home rc
+  dir="$TMP_ROOT/close-exit"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"
+  home=$(setup_home close-exit)
+  fm_write_meta "$home/state/t1.meta" "window=sess:fm-t1" "kind=ship"
+  printf 'needs-decision [key=github-pr]: which PR path\n' > "$home/state/t1.status"
+
+  rc=0
+  run_send "$fb" "$home" "$log" t1 --resolve-key github-pr "use the approved PR" || rc=$?
+  expect_code 0 "$rc" "a status-log decision answer should exit successfully after closing"
+  grep -qF "use the approved PR" "$home/state/t1.inbox/001.msg" \
+    || fail "the answer should reach the worker inbox"
+  sed -E 's/ \[at=[0-9]+\]//' "$home/state/t1.status" | grep -qF 'resolved [key=github-pr]: answered: use the approved PR' \
+    || fail "the status-log decision should be closed"
+  pass "fm-send --resolve-key: status-log answer delivers and closes with exit 0"
+}
+
 # The answerer's close is this home's own bookkeeping: it must not re-wake the
 # session that wrote it, while any other writer's later line on the same task
 # still must. Both directions are read through the production seen-signature
@@ -872,3 +890,4 @@ test_stamped_close_line_stays_within_the_status_line_cap
 test_failed_close_recovery_command_is_shell_safe
 test_remote_reserved_pending_reply_key_closes_locally
 test_decision_answer_partition_relocates_under_the_record
+test_answer_close_exits_successfully
