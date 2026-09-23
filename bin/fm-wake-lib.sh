@@ -931,10 +931,14 @@ fm_recovery_marker_reopen_announced() {
 }
 
 fm_lock_try_acquire() {
-  local lockdir=$1 pid steal cur rc steal_owner primary_owner current
+  local lockdir=$1 depth=${2:-0} pid steal cur rc steal_owner primary_owner current
   FM_LOCK_HELD_PID=
   FM_LOCK_OWNER_DIR=
   FM_LOCK_RECOVERED_PID=
+  if [ "$depth" -gt 8 ]; then
+    printf 'fm_lock_try_acquire: cannot acquire %s: steal-lock recursion limit reached\n' "$lockdir" >&2
+    return 1
+  fi
 
   if fm_lock_try_create "$lockdir"; then
     return 0
@@ -968,7 +972,10 @@ fm_lock_try_acquire() {
   fi
 
   steal="$lockdir.steal"
-  if ! fm_lock_try_acquire "$steal"; then
+  if ! fm_lock_try_acquire "$steal" "$((depth + 1))"; then
+    if [ "$depth" -ge 8 ]; then
+      printf 'fm_lock_try_acquire: cannot acquire %s: unable to create steal lock (state directory may be unwritable or full)\n' "$lockdir" >&2
+    fi
     FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
     FM_LOCK_OWNER_DIR=
     return 1
