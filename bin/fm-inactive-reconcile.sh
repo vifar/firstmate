@@ -385,6 +385,26 @@ pr_for_task() { # <meta> [preferred-line]
   fi
   clean_field "$value"
 }
+verify_done_pr() { # <pr-url> <mode>
+  local pr=$1 mode=$2 result verifier=${FM_INACTIVE_PR_STATE_BIN:-$SCRIPT_DIR/fm-pr-state.sh}
+  case "$mode" in direct-PR|no-mistakes) [ -n "$pr" ] || return 1 ;; *) return 0 ;; esac
+  result=$("$verifier" "$pr" 2>&1) || {
+    printf 'fm-inactive-reconcile: cannot verify completed PR %s: %s\n' "$pr" "$result" >&2
+    return 1
+  }
+  printf '%s\n' "$result" | awk '
+    /^STATE: merged at / { merged=1 }
+    /^DRAFT:/ { draft=1 }
+    /^CHECK SUMMARY: total=[1-9][0-9]* pass=[1-9][0-9]* fail=0 pending=0$/ { summary=1; total=$3; sub(/^total=/, "", total); sub(/ pass=.*/, "", total) }
+    /^CHECK: / { entries++ }
+    /^REVIEW THREADS: unresolved=0$/ { threads=1 }
+    /^UNRESOLVED THREAD: / { unresolved=1 }
+    END { exit !(merged || (summary && entries==total && threads && !unresolved && !draft)) }
+  ' || {
+    printf 'fm-inactive-reconcile: completed PR is not independently verified: %s\n' "$pr" >&2
+    return 1
+  }
+}
 
 home_secondmate_id() {
   fm_parent_channel_home_id "$FM_HOME"
@@ -459,14 +479,19 @@ claim_inactive_report_for_ledger() { # <task> <incarnation> <state> <ledger-fing
 # delivered, or nothing is owed, and 1 when it is owed but the parent channel
 # could not be written (the notice is queued once per record).
 report_child_ledger_locked() { # <id> <meta>
-  local id=$1 meta=$2 status last previous state note pr mode yolo data incarnation fingerprint predecessor_head outcome_key line
+  local id=$1 meta=$2 status last previous state note pr mode kind yolo data incarnation fingerprint predecessor_head outcome_key line
   status="$STATE/$id.status"
   last=$(child_terminal_ledger_line "$status") || return 0
   state=$(status_line_verb "$last")
   pr=$(pr_for_task "$meta" "$last")
+  mode=$(clean_field "$(meta_field "$meta" mode)")
   incarnation=$(meta_incarnation "$meta")
   fingerprint=$(sha256_text "$incarnation|$id|$state|ledger|$last")
   outcome_key="child-outcome-$id-$state-${fingerprint:0:8}"
+  kind=$(clean_field "$(meta_field "$meta" kind)")
+  case "$state:$kind:$mode" in
+    done:ship:direct-PR|done:ship:no-mistakes) verify_done_pr "$pr" "$mode" || return 1 ;;
+  esac
   ensure_record "$fingerprint" "$id" "$incarnation" "$state" "$outcome_key" direct upstream "$pr" || return 1
   [ -n "$RECORD_PENDING" ] || return 0
   last_status_line "$status" previous >/dev/null
@@ -567,6 +592,10 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     *) rm -f -- "$(inactive_obligation_marker "$id")"; return 0 ;;
   esac
   pr=$(pr_for_task "$meta")
+  mode=$(clean_field "$(meta_field "$meta" mode)")
+  case "$state:$kind:$mode" in
+    done:ship:direct-PR|done:ship:no-mistakes) verify_done_pr "$pr" "$mode" || return 1 ;;
+  esac
   incarnation=$(meta_incarnation "$meta")
   fingerprint=$(sha256_text "$incarnation|$id|$state|$pr|$(clean_field "$last")")
   if [ -n "$self" ]; then

@@ -255,15 +255,17 @@ fm_dod_block() {  # <mode> <task-id>
 Delivery contract: mode=direct-PR
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
-When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
+1: When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
-When it is implemented and committed, discover the repository owner with \`gh repo view --json owner\`, then push your branch and open a ready-for-review PR with \`gh-axi pr create\` and its \`--assignee OWNER\` flag.
-Set \`PR_URL\` to the exact URL returned by \`gh-axi pr create\`, and set \`OWNER\` from \`gh repo view --json owner\`.
-Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.
-Verify the PR assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the captain's account is not assigned, correct it with \`gh pr edit "\$PR_URL" --add-assignee "\$OWNER"\` before reporting done.
+When it is implemented and committed, discover the repository owner with `gh repo view --json owner`, then push your branch and open a ready-for-review PR with `gh-axi pr create` and its `--assignee OWNER` flag.
+Set `PR_URL` to the exact URL returned by `gh-axi pr create`, and set `OWNER` from `gh repo view --json owner`.
+Before you report done, read the PR back from the forge and confirm it is not a draft (`gh pr view <url> --json isDraft` must print false); if it is a draft, mark it ready with `gh-axi pr ready`.
+Verify the PR assignee with `gh pr view "$PR_URL" --json assignees`; if the captain's account is not assigned, correct it with `gh pr edit "$PR_URL" --add-assignee "$OWNER"` before reporting done.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
-Then report your completed PR with its full URL in the status file and stop.
+Independently read the PR's complete check set and unresolved review-thread state from the forge; enumerate every check and report total/pass/fail/pending counts and every unresolved thread, never a required-only or otherwise partial subset.
+Use `bin/fm-pr-state.sh <url>` for the independent current-state read and require it to finish successfully; an unreadable or incomplete result is not a green claim.
+Then append `done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>` with all unresolved thread identifiers/details, and stop.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
@@ -319,8 +321,11 @@ Two firstmate-specific rules layer on top of that guidance:
 
 Set \`PR_URL\` to the exact URL returned by the pipeline, and set \`OWNER\` from \`gh repo view --json owner\`.
 After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.
-Verify its assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the captain's account is not assigned, discover the repository owner with \`gh repo view --json owner\` and correct it with \`gh pr edit "\$PR_URL" --add-assignee "\$OWNER"\` before reporting done.
-Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
+Verify its assignee with `gh pr view "$PR_URL" --json assignees`; if the captain's account is not assigned, discover the repository owner with `gh repo view --json owner` and correct it with `gh pr edit "$PR_URL" --add-assignee "$OWNER"` before reporting done.
+A draft cannot be merged, so do not report done while it remains a draft.
+Independently read the complete current check set and unresolved review-thread state from the forge; enumerate every check and report total/pass/fail/pending counts and every unresolved thread, never a required-only or otherwise partial subset.
+Use `bin/fm-pr-state.sh <url>` for this read and require it to finish successfully; an unreadable or incomplete result is not a green claim.
+Then append `done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>` with all unresolved thread identifiers/details, and stop. You are finished.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 EOF
       ;;

@@ -61,6 +61,19 @@ printf '%s\n' "$(basename "$0")" >> "${FM_FORGE_LOG:?}"
 exit 97
 SH
   done
+  cat > "$fake/fm-pr-state.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_PR_STATE_LOG:?}"
+case "${FM_PR_STATE_MODE:-green}" in
+  fail) printf 'CHECK SUMMARY: total=2 pass=1 fail=1 pending=0\nCHECK: a status=COMPLETED/SUCCESS\nCHECK: b status=COMPLETED/FAILURE\nREVIEW THREADS: unresolved=0\n';;
+  pending) printf 'CHECK SUMMARY: total=2 pass=1 fail=0 pending=1\nCHECK: a status=COMPLETED/SUCCESS\nCHECK: b status=QUEUED/\nREVIEW THREADS: unresolved=0\n';;
+  incomplete) printf 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0\nCHECK: a status=COMPLETED/SUCCESS\nREVIEW THREADS: unresolved=0\n';;
+  threads) printf 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0\nCHECK: a status=COMPLETED/SUCCESS\nCHECK: b status=COMPLETED/SUCCESS\nREVIEW THREADS: unresolved=1\nUNRESOLVED THREAD: id=thread\n';;
+  merged) printf 'STATE: merged at 2026-09-23T00:00:00Z\n';;
+  error) printf 'forge unavailable\n' >&2; exit 1;;
+  *) printf 'CHECK SUMMARY: total=2 pass=2 fail=0 pending=0\nCHECK: a status=COMPLETED/SUCCESS\nCHECK: b status=COMPLETED/SUCCESS\nREVIEW THREADS: unresolved=0\n';;
+esac
+SH
   chmod +x "$fake"/*
 }
 
@@ -72,12 +85,23 @@ make_world() { # <name>
   : > "$MATE/AGENTS.md"
   make_tools "$WORLD"
   : > "$WORLD/forge.log"
+  : > "$WORLD/pr-state.log"
+}
+
+
+install_verified_pr_stub() {
+  cat > "$WORLD/fakebin/fm-pr-state.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'STATE: merged at 2026-09-23T00:00:00Z\n'
+SH
+  chmod +x "$WORLD/fakebin/fm-pr-state.sh"
 }
 
 bind_secondmate() { # <local|remote>
   local route=$1
   printf 'mate\n' > "$MATE/.fm-secondmate-home"
   if [ "$route" = local ]; then
+
     cat > "$MATE/.fm-secondmate-parent" <<EOF
 schema=fm-secondmate-parent.v1
 route=local
@@ -112,7 +136,9 @@ run_reconcile() { # <home> [--startup]
   local home=$1 option=${2:-}
   PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_INACTIVE_RECONCILE_SECS=60 FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" \
+    FM_INACTIVE_RECONCILE_SECS=60 FM_INACTIVE_RECONCILE_BUDGET_SECS="${FM_INACTIVE_RECONCILE_BUDGET_SECS:-10}" \
+    FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" \
+    FM_INACTIVE_PR_STATE_BIN="$WORLD/fakebin/fm-pr-state.sh" FM_PR_STATE_MODE="${FM_PR_STATE_MODE:-green}" FM_PR_STATE_LOG="$WORLD/pr-state.log" \
     FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan ${option:+"$option"}
 }
 
@@ -123,7 +149,8 @@ run_report() { # <home> <child>
   PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
     FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" \
-    FM_FORGE_LOG="$WORLD/forge.log" "$RECON" report "$child"
+    FM_INACTIVE_PR_STATE_BIN="$WORLD/fakebin/fm-pr-state.sh" FM_PR_STATE_MODE="${FM_PR_STATE_MODE:-green}" \
+    FM_FORGE_LOG="$WORLD/forge.log" FM_PR_STATE_LOG="$WORLD/pr-state.log" "$RECON" report "$child"
 }
 
 wake_count() { # <home> <key prefix>
@@ -161,7 +188,7 @@ reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 # is handled and acknowledged.
 test_main_direct_terminal_presentation_receipt() {
   local err seq generation
-  make_world main-direct; write_child "$MAIN" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
+  make_world main-direct; install_verified_pr_stub; write_child "$MAIN" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
   FM_FAKE_CREW_STATE='done' run_reconcile "$MAIN" --startup
   [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] || fail "main did not queue terminal presentation"
   [ "$(outcome_count "$MAIN" pending)" = 1 ] || fail "main did not retain presentation receipt"
@@ -175,16 +202,13 @@ test_main_direct_terminal_presentation_receipt() {
   [ "$(outcome_count "$MAIN" presented)" = 1 ] || fail "acknowledged presentation did not receive its own receipt"
   pass "main direct terminal presentation has a durable receipt"
 }
-
-# A secondmate delivers a child's terminal ledger line to the parent on the
-# very next poll, from the ledger alone: no current-state read, no inactive
 # cadence, and no line appended by the mate model. The delivery carries the
 # child's note, recorded PR, delivery mode, and merge posture, happens once,
 # and takes the outcome away from the inactive path so it is never reported
 # twice.
 test_local_secondmate_delivers_terminal_ledger_line() {
   local expected key
-  make_world local; bind_secondmate local
+  make_world local; bind_secondmate local; install_verified_pr_stub
   write_child "$MATE" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
   FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
   key=$(reported_outcome_key "$MATE" child 'done') || fail "ledger receipt did not retain its collision-resistant key"
@@ -213,13 +237,22 @@ test_secondmate_multiline_terminal_outcome_is_delivered_once() {
     for timing in before during; do
       make_world "multiline-$terminal-$timing"; bind_secondmate local
       write_child "$MATE" child 'working: finishing validation'
+      if [ "$terminal" = done ]; then install_verified_pr_stub; fi
       if [ "$timing" = before ]; then
-        printf '%s: validation finished\nSee the report for details.\n\n' "$terminal" >> "$MATE/state/child.status"
+        if [ "$terminal" = done ]; then
+          printf 'done: PR https://example.test/owner/repo/pull/1 checks green\nSee the report for details.\n\n' >> "$MATE/state/child.status"
+        else
+          printf 'failed: validation finished\nSee the report for details.\n\n' >> "$MATE/state/child.status"
+        fi
         age "$MATE/state/child.status"
       else
         cat > "$WORLD/fakebin/fm-crew-state.sh" <<'SH'
 #!/usr/bin/env bash
-printf '%s: validation finished\nSee the report for details.\n\n' "$FM_FAKE_CREW_STATE" >> "$FM_STATE_OVERRIDE/$1.status"
+if [ "$FM_FAKE_CREW_STATE" = done ]; then
+  printf 'done: PR https://example.test/owner/repo/pull/1 checks green\nSee the report for details.\n\n' >> "$FM_STATE_OVERRIDE/$1.status"
+else
+  printf '%s: validation finished\nSee the report for details.\n\n' "$FM_FAKE_CREW_STATE" >> "$FM_STATE_OVERRIDE/$1.status"
+fi
 printf 'state: %s · source: fake\n' "$FM_FAKE_CREW_STATE"
 SH
       fi
@@ -229,8 +262,9 @@ SH
       run_report "$MATE" child
       key=$(reported_outcome_key "$MATE" child "$terminal") \
         || fail "$terminal with trailing prose arriving $timing state read was not owned by the ledger"
-      grep -Fq "$terminal [key=$key]: child child $terminal: validation finished" "$MAIN/state/mate.status" \
-        || fail "$terminal with trailing prose arriving $timing state read was lost: $(cat "$MAIN/state/mate.status" 2>/dev/null)"
+      sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" \
+        | grep -Fq "$terminal [key=$key]: child child $terminal:" \
+        || fail "$terminal with trailing prose arriving $timing was lost: $(cat "$MAIN/state/mate.status" 2>/dev/null)"
       [ "$(wc -l < "$MAIN/state/mate.status" | tr -d ' ')" = 1 ] \
         || fail "$terminal with trailing prose arriving $timing state read was delivered twice"
       [ "$(outcome_count "$MATE" reported)" = 1 ] \
@@ -249,7 +283,8 @@ test_secondmate_unterminated_prose_reports_run_outcome() {
   printf 'Still going' >> "$MATE/state/child.status"
   age "$MATE/state/child.status"
   FM_FAKE_CREW_STATE='failed' run_reconcile "$MATE" --startup
-  grep -Fq "failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child" "$MAIN/state/mate.status" \
+  sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" \
+    | grep -Fq "failed [key=inactive-outcome-mate-child-failed]: inactive terminal child=child" \
     || fail "an unterminated prose line withheld a proven failure: $(cat "$MAIN/state/mate.status" 2>/dev/null)"
   [ "$(outcome_count "$MATE" reported)" = 1 ] || fail "the fallback report did not retain its receipt"
   age "$MATE/state/child.status"
@@ -296,8 +331,8 @@ test_busy_child_does_not_starve_later_ledger_outcomes() {
 # under the failed verb, and a later terminal line after recovery is a new
 # delivery rather than a suppressed duplicate.
 test_secondmate_ledger_delivery_carries_report_and_failure() {
-  local scout_key boom_key replaced_key
   make_world ledger-shapes; bind_secondmate local
+  install_verified_pr_stub
   write_child "$MATE" scout 'done: report written'
   mkdir -p "$MATE/data/scout"
   printf '# findings\n' > "$MATE/data/scout/report.md"
@@ -329,9 +364,11 @@ test_secondmate_ledger_delivery_carries_report_and_failure() {
 # task's delivered PR: without a recorded PR, only a terminal line in the
 # ready-signal shape carries one, and a scout never carries one at all.
 test_pr_field_requires_recorded_pr_or_ready_signal_line() {
-  local id prose_key ready_key stamped_key placeholder_key scout_key
   make_world pr-provenance; bind_secondmate local
-  write_child "$MATE" prose $'working: context in https://example.test/other/repo/pull/33\ndone: cleanup finished'
+  install_verified_pr_stub
+  write_child "$MATE" prose 'done: cleanup finished'
+  awk '{ sub(/^mode=no-mistakes$/, "mode=local-only"); print }' "$MATE/state/prose.meta" > "$MATE/state/prose.meta.tmp"
+  mv "$MATE/state/prose.meta.tmp" "$MATE/state/prose.meta"
   write_child "$MATE" ready 'done: PR https://example.test/owner/repo/pull/44 checks green'
   write_child "$MATE" stamped 'done [at=1788576000]: PR https://example.test/owner/repo/pull/66 checks green'
   write_child "$MATE" placeholder 'done [at=<epoch>]: PR https://example.test/owner/repo/pull/77 checks green'
@@ -343,6 +380,8 @@ test_pr_field_requires_recorded_pr_or_ready_signal_line() {
   awk '{ sub(/^kind=ship$/, "kind=scout"); print }' "$MATE/state/lookout.meta" \
     > "$MATE/state/lookout.meta.tmp"
   mv "$MATE/state/lookout.meta.tmp" "$MATE/state/lookout.meta"
+  awk '$0 !~ /^pr=/' "$MATE/state/lookout.meta" > "$MATE/state/lookout.meta.tmp"
+  mv "$MATE/state/lookout.meta.tmp" "$MATE/state/lookout.meta"
   FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
   prose_key=$(reported_outcome_key "$MATE" prose 'done') || fail "prose receipt key missing"
   ready_key=$(reported_outcome_key "$MATE" ready 'done') || fail "ready receipt key missing"
@@ -350,7 +389,7 @@ test_pr_field_requires_recorded_pr_or_ready_signal_line() {
   placeholder_key=$(reported_outcome_key "$MATE" placeholder 'done') \
     || fail "unsubstituted-stamp ready receipt key missing"
   scout_key=$(reported_outcome_key "$MATE" lookout 'done') || fail "scout receipt key missing"
-  sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" | grep -Fxq "done [key=$prose_key]: child prose done: cleanup finished mode=no-mistakes yolo=off" \
+  sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" | grep -Fxq "done [key=$prose_key]: child prose done: cleanup finished mode=local-only yolo=off" \
     || fail "a PR mentioned only in prose was claimed as the delivery: $(cat "$MAIN/state/mate.status")"
   sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" | grep -Fxq "done [key=$ready_key]: child ready done: PR https://example.test/owner/repo/pull/44 checks green pr=https://example.test/owner/repo/pull/44 mode=no-mistakes yolo=off" \
     || fail "a ready-signal terminal line did not carry its PR: $(cat "$MAIN/state/mate.status")"
@@ -365,6 +404,24 @@ test_pr_field_requires_recorded_pr_or_ready_signal_line() {
 
 # If a terminal ledger line lands while the authoritative state read is in
 # flight, the ledger path remains the single owner on the next poll.
+test_secondmate_done_relay_requires_verified_pr_state() {
+  local result
+  for result in green merged; do
+    make_world "relay-$result"; bind_secondmate local; install_verified_pr_stub
+    write_child "$MATE" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
+    FM_PR_STATE_MODE=$result FM_FAKE_CREW_STATE=unknown run_reconcile "$MATE"
+    grep -q 'child-outcome-child-done' "$MAIN/state/mate.status" || fail "$result PR result was not relayed"
+  done
+  for result in fail pending incomplete threads error; do
+    make_world "relay-$result"; bind_secondmate local; install_verified_pr_stub
+    write_child "$MATE" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
+    FM_PR_STATE_MODE=$result FM_FAKE_CREW_STATE=unknown run_reconcile "$MATE"
+    ! grep -q 'child-outcome-child-done' "$MAIN/state/mate.status" 2>/dev/null \
+      || fail "$result PR result was relayed despite incomplete verification"
+  done
+  pass "secondmate relays done only after complete passing PR verification or merge"
+}
+
 test_terminal_line_during_state_read_yields_to_ledger_delivery() {
   make_world state-ledger-race; bind_secondmate local
   write_child "$MATE" child 'working: finishing now'
@@ -448,17 +505,17 @@ test_long_terminal_lines_have_distinct_receipts() {
 # A line still being appended has no trailing newline yet and must wait.
 test_secondmate_partial_ledger_line_waits_for_newline() {
   local key
-  make_world partial; bind_secondmate local
-  write_child "$MATE" child 'working: nearly there'
-  printf 'done: half writ' >> "$MATE/state/child.status"
+  make_world partial; bind_secondmate local; install_verified_pr_stub
+  write_child "$MATE" child 'working: streaming terminal report'
+  printf 'done: PR https://example.test/owner/repo/pull/1 checks green' >> "$MATE/state/child.status"
   age "$MATE/state/child.status"
   FM_FAKE_CREW_STATE='done' run_reconcile "$MATE" --startup
   [ ! -s "$MAIN/state/mate.status" ] \
     || fail "an unterminated ledger line was delivered: $(cat "$MAIN/state/mate.status")"
-  printf 'ten\n' >> "$MATE/state/child.status"
+  printf '\n' >> "$MATE/state/child.status"
   FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
   key=$(reported_outcome_key "$MATE" child 'done') || fail "completed ledger receipt key missing"
-  sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" | grep -Fq "done [key=$key]: child child done: half written" \
+  sed -E 's/ \[at=[0-9]+\]//' "$MAIN/state/mate.status" | grep -Fq "done [key=$key]: child child done: PR https://example.test/owner/repo/pull/1 checks green pr=https://example.test/owner/repo/pull/1" \
     || fail "the completed line was not delivered once its newline landed"
   FM_FAKE_CREW_STATE='done' run_reconcile "$MATE" --startup
   [ "$(wc -l < "$MAIN/state/mate.status" | tr -d ' ')" = 1 ] \
@@ -482,7 +539,7 @@ test_secondmate_remote_route_ledger_delivery() {
 # is owed with 0, and returns non-zero only when the channel cannot be written.
 test_report_subcommand_delivers_and_refuses() {
   local rc key
-  make_world report; bind_secondmate local
+  make_world report; bind_secondmate local; install_verified_pr_stub
   write_child "$MATE" child 'done: final word'
   run_report "$MATE" child || fail "report refused a deliverable ledger line"
   key=$(reported_outcome_key "$MATE" child 'done') || fail "report receipt key missing"
@@ -508,7 +565,7 @@ test_report_subcommand_delivers_and_refuses() {
 # must not wait for the scan lock in the opposite order.
 test_report_avoids_scan_meta_lock_inversion() {
   local holder scan_pid report_pid i completed=0
-  make_world report-lock-order; bind_secondmate local
+  make_world report-lock-order; bind_secondmate local; install_verified_pr_stub
   write_child "$MATE" child 'done: final word'
   FM_HOME="$MATE" FM_STATE_OVERRIDE="$MATE/state" bash -c '
     . "$1/bin/fm-wake-lib.sh"
@@ -772,17 +829,17 @@ test_working_paused_and_captain_held_states_do_not_report() {
 # exempt from wedge escalation and emits no false wake.
 test_watcher_hook_and_idle_secondmate_exemption() {
   local out pid i
-  make_world watcher; write_child "$MAIN" child 'done: green'; prime_seen "$MAIN/state" "$MAIN/state/child.status"
+  make_world watcher; install_verified_pr_stub; write_child "$MAIN" child 'done: green'; prime_seen "$MAIN/state" "$MAIN/state/child.status"
   out="$WORLD/watch.out"
   PATH="$WORLD/fakebin:$PATH" FM_HOME="$MAIN" FM_STATE_OVERRIDE="$MAIN/state" \
     FM_INACTIVE_RECONCILE_SECS=60 FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" \
-    FM_FORGE_LOG="$WORLD/forge.log" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_FORGE_LOG="$WORLD/forge.log" FM_PR_STATE_LOG="$WORLD/pr-state.log" FM_INACTIVE_PR_STATE_BIN="$WORLD/fakebin/fm-pr-state.sh" FM_PR_STATE_MODE=green FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
     FM_FAKE_CREW_STATE='done' "$WATCH" > "$out" 2>&1 &
   pid=$!
   i=0
   while [ "$i" -lt 40 ]; do
     kill -0 "$pid" 2>/dev/null || break
-    [ "$(wake_count "$MAIN" 'inactive-outcome:')" = 1 ] && break
+    grep -Fq 'check: inactive-outcome' "$out" && break
     sleep 0.1
     i=$((i + 1))
   done
@@ -804,12 +861,12 @@ test_watcher_hook_and_idle_secondmate_exemption() {
 test_watcher_poll_delivers_child_ledger_line_to_parent() {
   local pid i key
   make_world watcher-ledger; bind_secondmate local
+  install_verified_pr_stub
   write_child "$MATE" child 'done: PR https://example.test/owner/repo/pull/1 checks green'
-  prime_seen "$MATE/state" "$MATE/state/child.status"
   PATH="$WORLD/fakebin:$PATH" FM_HOME="$MATE" FM_STATE_OVERRIDE="$MATE/state" FM_DATA_OVERRIDE="$MATE/data" \
     FM_CONFIG_OVERRIDE="$MATE/config" FM_INACTIVE_RECONCILE_SECS=60 \
-    FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" FM_FORGE_LOG="$WORLD/forge.log" \
-    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_INACTIVE_CREW_STATE_BIN="$WORLD/fakebin/fm-crew-state.sh" FM_FORGE_LOG="$WORLD/forge.log" FM_PR_STATE_LOG="$WORLD/pr-state.log" \
+    FM_INACTIVE_PR_STATE_BIN="$WORLD/fakebin/fm-pr-state.sh" FM_PR_STATE_MODE=green FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
     FM_FAKE_CREW_STATE='unknown' "$WATCH" > "$WORLD/mate-watch.out" 2>&1 &
   pid=$!
   i=0
@@ -971,7 +1028,7 @@ printf 'guard-finished\n' > "$FM_HOME/slow-guard.log"
 SH
     chmod +x "$WORLD/root/bin/fm-guard.sh"
     started=$(date +%s)
-    FM_INACTIVE_RECONCILE_BUDGET_SECS=1 FM_FAKE_CREW_STATE='done' \
+    FM_FAKE_CREW_STATE='done' FM_INACTIVE_RECONCILE_BUDGET_SECS=1 \
       run_reconcile "$MAIN" --startup > "$WORLD/reconcile.out" 2>&1
     elapsed=$(( $(date +%s) - started ))
     [ "$elapsed" -ge 3 ] && [ -f "$MAIN/slow-guard.log" ] || fail "classification timeout interrupted standard teardown: $(cat "$WORLD/reconcile.out")"
