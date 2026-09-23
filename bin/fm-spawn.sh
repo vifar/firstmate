@@ -3933,6 +3933,33 @@ agy_spawn_fail() {  # <detail>
   rovo_endpoint_cleanup
 }
 
+# omp's extension emits the first trustworthy signal only after its agent starts.
+# Allow 90 seconds: four-and-a-half times the documented ~20-second cold start,
+# leaving room for a loaded host and omp's title-generator preflight.
+omp_wait_for_working() {
+  local timeout=${FM_OMP_READY_TIMEOUT_SECS:-90} rc=0
+  case "$timeout" in ''|*[!0-9]*|0*) timeout=90 ;; esac
+  fm_run_timed "$timeout" bash -c '
+    state=$1
+    id=$2
+    while :; do
+      record=$(cat "$state/$id.busy-state" 2>/dev/null || true)
+      case "$record" in
+        *"state=busy source=omp-ext event=agent-start "*|*"state=busy source=omp-ext event=agent_start "*) exit 0 ;;
+      esac
+      sleep 0.5
+    done
+  ' _ "$STATE" "$ID" || rc=$?
+  [ "$rc" -eq 0 ]
+}
+
+omp_spawn_fail() { # <detail>
+  SPAWN_FAILURE_STATUS_LINE=$(status_stamp_line "failed: $1")
+  spawn_emit_failure_breadcrumb || echo "warning: could not record spawn failure status event for $ID" >&2
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -5035,6 +5062,12 @@ if [ "$HARNESS" = agy ]; then
     exit 1
   fi
 fi
+if [ "$HARNESS" = omp ] && [ "$KIND" != secondmate ]; then
+  if ! omp_wait_for_working; then
+    omp_spawn_fail "omp did not start processing its brief within ${FM_OMP_READY_TIMEOUT_SECS:-90}s in window $T"
+    exit 1
+  fi
+fi
 if [ "$KIND" = secondmate ] && [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
   if ! fm_config_reread_discard_pending "$PROJ_ABS" "$ID" "$FM_HOME"; then
     if fm_config_reread_quarantine_pending "$PROJ_ABS" "$ID" "$FM_HOME"; then
@@ -5044,6 +5077,7 @@ if [ "$KIND" = secondmate ] && [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
     fi
   fi
 fi
+
 
 # This is the commit point: all endpoint and harness delivery that can reject
 # the spawn has succeeded. Re-read and transition while holding the same
