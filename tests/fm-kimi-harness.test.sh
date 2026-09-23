@@ -275,6 +275,24 @@ $1
 EOF
 }
 
+test_kimi_failed_fresh_spawn_suppresses_its_failure_event_after_rollback() {
+  local id rec out rc=0 status
+  id="kimi-rollback-z1-$$"
+  rec=$(make_spawn_case rollback "$id")
+  read_spawn_record "$rec"
+  printf '%s\n' 'blocked: preserve this unrelated event' 'failed: an earlier spawn failure' > "$HOME_DIR/state/$id.status"
+  out=$(FM_FAKE_KIMI_DELIVERY=no FM_FAKE_KIMI_READY=yes FM_FAKE_KIMI_TRUST=remembered \
+    FM_KIMI_READY_POLLS=3 run_spawn \
+    "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id") || rc=$?
+  assert_contains "$out" "kimi brief pointer delivery was not confirmed" "spawn failure did not report the delivery gate failure"
+  status=$(cat "$HOME_DIR/state/$id.status")
+  [ -s "$CASE_DIR/pointer.log" ] || fail "spawn failed before attempting Kimi pointer delivery"
+  [ "$status" = $'blocked: preserve this unrelated event\nfailed: an earlier spawn failure' ] \
+    || fail "successful rollback did not preserve only pre-existing status events: $status"
+  assert_absent "$HOME_DIR/state/$id.meta" "failed fresh spawn retained its task record"
+  pass "failed fresh spawn suppresses its failure event after successful rollback and preserves prior events"
+}
+
 test_kimi_launch_then_send_is_verified() {
   local id rec out rc launch pointer brief_real meta task_tmp launch_dir launch_file launch_base
   id="kimi-success-z1-$$"
@@ -704,8 +722,8 @@ test_kimi_unconfirmed_delivery_fails_loudly() {
   [ "$rc" -ne 0 ] || fail "an unconfirmed kimi delivery should fail"
   assert_contains "$out" "kimi brief pointer delivery was not confirmed" \
     "unconfirmed kimi delivery lacked a loud diagnostic"
-  assert_grep 'failed: kimi brief pointer delivery was not confirmed' <(sed -E 's/ \[at=[0-9]+\]//' "$HOME_DIR/state/$id.status") \
-    "unconfirmed kimi delivery did not leave a supervisor-visible failure"
+  [ ! -f "$HOME_DIR/state/$id.status" ] || [ ! -s "$HOME_DIR/state/$id.status" ] \
+    || fail "successful fresh-spawn rollback left a misleading delivery-failure event"
   pass "fm-spawn: kimi treats a silent pointer drop as a failed spawn"
 }
 
@@ -1119,6 +1137,7 @@ test_kimi_hook_install_is_surgical_idempotent_and_removable
 test_kimi_hook_remove_preserves_owned_newline_boundary
 test_kimi_hook_fails_closed_on_missing_malformed_or_partial_config
 test_kimi_hook_install_refuses_without_jq
+test_kimi_failed_fresh_spawn_suppresses_its_failure_event_after_rollback
 test_kimi_launch_then_send_is_verified
 test_kimi_spawn_refuses_shared_task_temp_root
 test_kimi_hook_is_silent_and_requires_registered_workspace_token

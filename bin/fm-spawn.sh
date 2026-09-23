@@ -1099,6 +1099,8 @@ SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
 SPAWN_FRESH_COMMIT_PENDING=0
+SPAWN_FRESH_COMMIT_ROLLED_BACK=0
+SPAWN_FAILURE_STATUS_LINE=
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
@@ -1117,11 +1119,30 @@ spawn_fresh_commit_rollback() {
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
     "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
+    SPAWN_FRESH_COMMIT_ROLLED_BACK=1
     return 0
   fi
   echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
   return 1
 }
+
+spawn_record_failure_breadcrumb() {
+  [ -n "$SPAWN_FAILURE_STATUS_LINE" ] || return 0
+  printf '%s\n' "$SPAWN_FAILURE_STATUS_LINE" >>"$STATE/$ID.status"
+}
+
+spawn_emit_failure_breadcrumb() {
+  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+    return 0
+  fi
+  spawn_record_failure_breadcrumb
+}
+
+spawn_record_deferred_failure_breadcrumb() {
+  [ -n "$SPAWN_FAILURE_STATUS_LINE" ] || return 0
+  spawn_record_failure_breadcrumb || echo "warning: could not record spawn failure status event for $ID" >&2
+}
+
 
 parse_orca_worktree_result() {
   local raw=$1 rest
@@ -1231,6 +1252,9 @@ spawn_abort_cleanup() {
     if ! spawn_fresh_commit_rollback; then
       status=1
     fi
+  fi
+  if [ -n "$SPAWN_FAILURE_STATUS_LINE" ] && [ "$SPAWN_FRESH_COMMIT_ROLLED_BACK" != 1 ]; then
+    spawn_record_deferred_failure_breadcrumb
   fi
   if [ "$SPAWN_META_LOCK_HELD" = 1 ]; then
     SPAWN_META_LOCK_HELD=0
@@ -1671,6 +1695,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # (fm_backend_herdr_launcher_identity). The record is about to overwrite it,
     # so keep what herdr actually injected: a rebind still has to prove its own
     # launcher identity, and a task's recorded pane is not it.
+    # shellcheck disable=SC2034 # Herdr adapter reads this sourced launcher identity.
     RELAUNCH_LAUNCHER_PANE_ID=${HERDR_PANE_ID:-}
     HERDR_SES=$(fm_meta_get "$RELAUNCH_META" herdr_session)
     HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
@@ -3659,10 +3684,42 @@ kimi_wait_for_ready() {
   local ready_captures=0
   KIMI_READY_FAILURE_DETAIL='kimi did not show a verified ready signal before brief delivery'
   while [ "$i" -lt "$max" ]; do
-    pane=$(kimi_capture)
-    if printf '%s\n' "$pane" | grep -Fq 'Welcome to Kimi Code!' ||
-      kimi_composer_is_empty; then
-      return 0
+    capture_rc=0
+    pane=$(kimi_visible_capture) || capture_rc=$?
+    if [ "$capture_rc" -ne 0 ]; then
+      KIMI_READY_FAILURE_DETAIL="kimi readiness could not read the visible viewport of backend '$BACKEND' (viewport capture exited $capture_rc), so the trust dialog could neither be answered nor ruled out"
+      return 1
+    fi
+    if [ -z "$pane" ]; then
+      ready_captures=0
+      i=$((i + 1))
+      [ "$i" -ge "$max" ] || sleep "$interval"
+      continue
+    fi
+    if kimi_trust_dialog_is_visible "$pane"; then
+      trust_seen=1
+      trust_still_visible=1
+      trust_markers_pending=0
+      ready_captures=0
+      if ! spawn_send_key "$T" Enter; then
+        KIMI_READY_FAILURE_DETAIL="kimi trust dialog was seen but the affirmative selection could not be submitted"
+        return 1
+      fi
+      trust_enters=$((trust_enters + 1))
+    else
+      trust_still_visible=0
+      if kimi_trust_marker_is_present "$pane"; then
+        trust_markers_pending=1
+        ready_captures=0
+      else
+        trust_markers_pending=0
+        if kimi_ready_signal_is_present "$pane"; then
+          ready_captures=$((ready_captures + 1))
+          [ "$ready_captures" -lt 2 ] || return 0
+        else
+          ready_captures=0
+        fi
+      fi
     fi
     i=$((i + 1))
     [ "$i" -ge "$max" ] || sleep "$interval"
@@ -3701,7 +3758,8 @@ kimi_wait_for_delivery() {
 }
 
 kimi_spawn_fail() { # <detail>
-  printf 'failed: %s\n' "$1" >>"$STATE/$ID.status"
+  SPAWN_FAILURE_STATUS_LINE=$(status_stamp_line "failed: $1")
+  spawn_emit_failure_breadcrumb || echo "warning: could not record spawn failure status event for $ID" >&2
   echo "error: $1; inspect window $T" >&2
 }
 
@@ -3769,7 +3827,8 @@ rovo_wait_for_delivery() {
 }
 
 rovo_spawn_fail() { # <detail>
-  printf 'failed: %s\n' "$1" >>"$STATE/$ID.status"
+  SPAWN_FAILURE_STATUS_LINE=$(status_stamp_line "failed: $1")
+  spawn_emit_failure_breadcrumb || echo "warning: could not record spawn failure status event for $ID" >&2
   echo "error: $1; inspect window $T" >&2
   rovo_endpoint_cleanup
 }
@@ -3842,7 +3901,8 @@ agy_wait_for_working() {
 }
 
 agy_spawn_fail() {  # <detail>
-  printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
+  SPAWN_FAILURE_STATUS_LINE=$(status_stamp_line "failed: $1")
+  spawn_emit_failure_breadcrumb || echo "warning: could not record spawn failure status event for $ID" >&2
   echo "error: $1; inspect window $T" >&2
   rovo_endpoint_cleanup
 }

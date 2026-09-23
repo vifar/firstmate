@@ -291,18 +291,13 @@ test_rovo_readiness_gate_precedes_pointer() {
   [ "$rc" -ne 0 ] || fail "rovo spawn without a ready signal should fail"
   assert_contains "$out" "rovo did not show a verified ready signal" \
     "rovo readiness failure lacked a loud diagnostic"
-  line=$(cat "$HOME_DIR/state/$id.status")
-  [ "$(status_line_verb "$line")" = failed ] || fail "rovo readiness failure lost its failed verb"
-  assert_contains "$(status_line_note "$line")" 'rovo did not show a verified ready signal' \
-    "rovo readiness failure did not leave a supervisor-visible failure"
+  [ ! -s "$HOME_DIR/state/$id.status" ] \
+    || fail "successful fresh-spawn rollback left a misleading readiness-failure event"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] \
+    || fail "successful readiness-failure rollback retained the task record"
   [ ! -s "$CASE_DIR/pointer.log" ] || fail "rovo pointer was sent before an observable ready signal"
   grep -q "kill-window.*fm-$id" "$CASE_DIR/tmux-calls.log" \
     || fail "a failed rovo readiness gate must tear down the exact endpoint it created instead of leaking an orphaned --yolo process"
-  status_line_at_epoch "$line" >/dev/null \
-    || fail "new rovo spawn failure has unknown emission time: $line"
-  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
-    printf 'Rovo readiness failure CLI output:\n%s\nPersisted status:\n%s\n' "$out" "$line"
-  fi
   pass "fm-spawn: rovo never sends the brief pointer before an observable ready signal, and tears down the created endpoint on failure"
 }
 
@@ -320,10 +315,10 @@ test_rovo_unconfirmed_delivery_fails_loudly() {
   [ -n "$pointer" ] || fail "rovo never typed the pointer before the delivery gate"
   assert_contains "$out" "rovo brief pointer delivery was not confirmed" \
     "unconfirmed rovo delivery lacked a loud diagnostic"
-  [ "$(status_line_verb "$(cat "$HOME_DIR/state/$id.status")")" = failed ] \
-    || fail "unconfirmed rovo delivery lost its failed verb"
-  assert_contains "$(status_line_note "$(cat "$HOME_DIR/state/$id.status")")" 'rovo brief pointer delivery was not confirmed' \
-    "unconfirmed rovo delivery did not leave a supervisor-visible failure"
+  [ ! -s "$HOME_DIR/state/$id.status" ] \
+    || fail "successful fresh-spawn rollback left a misleading delivery-failure event"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] \
+    || fail "successful delivery-failure rollback retained the task record"
   grep -q "kill-window.*fm-$id" "$CASE_DIR/tmux-calls.log" \
     || fail "an unconfirmed rovo delivery must tear down the exact endpoint it created instead of leaking an orphaned --yolo process"
   pass "fm-spawn: rovo treats a silent pointer drop as a failed spawn, and tears down the created endpoint"
