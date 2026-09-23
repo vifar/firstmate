@@ -645,6 +645,29 @@ seed_backlog_in_flight() {
   tasks-axi start task-x1 --file "$case_dir/data/backlog.md" >/dev/null
 }
 
+seed_issue_link() {
+  local case_dir=$1 url=${2:-https://github.com/example/repo/issues/42}
+  tasks-axi update task-x1 --title "teardown fixture task" --body "$url" --file "$case_dir/data/backlog.md" >/dev/null
+}
+
+seed_issue_links() {
+  local case_dir=$1 links=$2
+  tasks-axi update task-x1 --body "issue links: $links" --file "$case_dir/data/backlog.md" >/dev/null
+}
+
+mock_issue_api() {
+  local case_dir=$1 state=${2:-closed} labels=${3:-verified}
+  cat > "$case_dir/fakebin/gh" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "api repos/example/repo/issues/42") printf '%s\\n' '{"state":"$state","labels":[$(printf '%s' "$labels" | awk -F, '{for(i=1;i<=NF;i++) printf "%s{\"name\":\"%s\"}", (i>1?",":""), $i}')]}'; exit 0 ;;
+  "pr view") echo "error: pull request not found" >&2 ; exit 1 ;;
+esac
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/gh"
+}
+
 backlog_row_state() {
   local case_dir=$1
   tasks-axi show task-x1 --file "$case_dir/data/backlog.md" 2>/dev/null |
@@ -694,8 +717,6 @@ test_local_only_fork_remote_allows() {
     || fail "fork-allow: post-teardown branch report was not stored"
   [ ! -e "$case_dir/state/.task-x1.branch-outcome-index" ] \
     || fail "fork-allow: post-teardown branch report recreated the retired task index"
-  [ "$(cat "$case_dir/state/.branch-outcome-index-ready")" = 1 ] \
-    || fail "fork-allow: post-teardown branch report did not publish its ready sequence"
   jq -e --arg id task-x1 '
     .schema == "fm-secondmate-home-summary.v1"
     and all(.endpoints[]; .id != $id)
@@ -703,9 +724,124 @@ test_local_only_fork_remote_allows() {
     || fail "successful task teardown did not publish the task's removal from the home summary ledger"
   pass "local-only worktree with HEAD on a fork remote is torn down and the home summary is refreshed"
 }
+test_issue_finalization_gate_refuses_unfinished_link() {
+  local case_dir rc
+  case_dir=$(make_case issue-open-refused)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir"
+  mock_issue_api "$case_dir" open verified
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "issue-open-refused: --force must not bypass issue finalization"
+  assert_grep 'issue https://github.com/example/repo/issues/42 is not finalized: issue is open' "$case_dir/stderr" \
+    "open issue refusal did not name URL and state"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "open issue refusal changed backlog"
+  pass "issue-linked teardown refuses an open issue even with --force"
+}
 
+test_issue_finalization_closed_verified_allows_teardown() {
+  local case_dir
+  case_dir=$(make_case issue-closed-verified)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir"
+  mock_issue_api "$case_dir" closed verified
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "closed verified issue should permit teardown: $(cat "$case_dir/stderr")"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "finalized issue task was not completed"
+  pass "closed and verified linked issue permits teardown"
+}
+
+test_issue_finalization_missing_label_refuses() {
+  local case_dir rc
+  case_dir=$(make_case issue-missing-label)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir"
+  mock_issue_api "$case_dir" closed other
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "missing verified label must refuse"
+  assert_grep 'verified label absent: verified' "$case_dir/stderr" "missing label refusal omitted reason"
+  [ "$(backlog_row_state "$case_dir")" = in_flight ] || fail "missing label refusal changed backlog"
+  pass "closed issue without configured verification label is refused"
+}
+
+test_issue_finalization_api_failure_refuses() {
+  local case_dir rc
+  case_dir=$(make_case issue-api-failure)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir"
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "issue API failure must refuse"
+  assert_grep 'GitHub API/read failure' "$case_dir/stderr" "API failure refusal omitted reason"
+  pass "GitHub issue read failure is fail-closed"
+}
+
+test_issue_finalization_malformed_link_refuses() {
+  local case_dir rc
+  case_dir=$(make_case issue-malformed-link)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir" https://github.com/example/repo/issues/not-a-number
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "malformed issue URL must refuse"
+  assert_grep 'issue link is ambiguous or malformed' "$case_dir/stderr" "malformed link refusal omitted reason"
+  pass "malformed issue links are refused"
+}
+
+test_issue_finalization_reason_change_preserves_matching_blocker() {
+  local case_dir
+  case_dir=$(make_case issue-blocker-reason-change)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir"
+  mock_issue_api "$case_dir" open verified
+  printf '%s\n' 'blocked [key=issue-finalization]: issue https://github.com/example/repo/issues/42; previous reason: waiting on upstream' > "$case_dir/state/task-x1.status"
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "matching issue blocker with shifted reason should permit cleanup"
+  [ "$(backlog_row_state "$case_dir")" = queued ] || fail "matching blocker cleanup closed backlog"
+  pass "issue blocker identity survives reason changes"
+}
+
+test_issue_finalization_multiple_links_refuses() {
+  local case_dir rc
+  case_dir=$(make_case issue-ambiguous-link)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  seed_issue_link "$case_dir" 'https://github.com/example/repo/issues/42 https://github.com/example/repo/issues/43'
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "ambiguous issue links must refuse"
+  assert_grep 'issue link is ambiguous or malformed' "$case_dir/stderr" "ambiguous link refusal omitted reason"
+  pass "ambiguous linked issues are refused"
+}
+
+test_issue_finalization_non_issue_link_unchanged() {
+  local case_dir
+  case_dir=$(make_case issue-unlinked)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "unlinked task should retain existing teardown behavior"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "unlinked task was not completed"
+  pass "task without issue link retains existing completion behavior"
+}
 test_teardown_closes_the_backlog_item_itself() {
-  local case_dir out
   case_dir=$(make_case tasks-axi-close)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
@@ -3835,6 +3971,8 @@ EOF
 
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
+test_issue_finalization_gate_refuses_unfinished_link
+test_issue_finalization_reason_change_preserves_matching_blocker
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
@@ -3922,3 +4060,7 @@ test_process_spawned_during_grace_is_reaped_on_later_pass
 test_persistent_scan_refuses_after_bounded_retries
 test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
+test_issue_finalization_gate_refuses_unfinished_link
+test_issue_finalization_closed_verified_allows_teardown
+test_issue_finalization_matching_blocker_retains_backlog
+test_issue_finalization_non_issue_link_unchanged

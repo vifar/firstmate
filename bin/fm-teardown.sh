@@ -3389,17 +3389,66 @@ if [ "$BACKEND" = herdr ]; then
 fi
 
 BACKLOG_CLOSED=0
+BACKLOG_SKIP_REASON=${TEARDOWN_BACKLOG_SKIP_REASON:-}
 BACKLOG_TRANSITION=$TEARDOWN_BACKLOG_TRANSITION
-BACKLOG_TRANSITION_FLAGS=()
-[ "$BACKLOG_TRANSITION" = close ] || BACKLOG_TRANSITION_FLAGS=(--retain)
-BACKLOG_SKIP_REASON=
-if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
-  backlog_done_args || {
-    echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
+backlog_done_args || {
+  echo "REFUSED: completion details for $ID could not be prepared; refusing cleanup." >&2
+  exit 1
+}
+ISSUE_FINALIZATION_BLOCKED=0
+if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ] && [ "$KIND" = ship ]; then
+  ISSUE_ROW=$(fm_backlog_row_show "$DATA" "$ID" --full 2>/dev/null) || {
+    echo "REFUSED: cannot read backlog links for issue-finalization gate on $ID; refusing cleanup." >&2
     exit 1
   }
-# Roll the accepted legacy incarnation's stamp back to the record's exact
-# pre-stamp bytes. Uses perl - already in the teardown lifecycle's curated PATH
+  ISSUE_LINKS=$(printf '%s\n' "$ISSUE_ROW" | sed -n 's/^  links: //p' | head -1 | LC_ALL=C perl -MJSON::PP -e 'local $/; my $v=<STDIN>; $v =~ s/\s+\z//; print JSON::PP->new->allow_nonref->decode($v) if $v ne "" && $v ne "none";')
+  ISSUE_BODY=$(printf '%s\n' "$ISSUE_ROW" | sed -n 's/^  body: //p' | head -1 | LC_ALL=C perl -MJSON::PP -e 'local $/; my $v=<STDIN>; $v =~ s/\s+\z//; my $decoded=$v eq "" || $v eq "-" ? "" : JSON::PP->new->allow_nonref->decode($v); print $decoded unless $decoded eq "-";')
+  ISSUE_CANDIDATES=$(
+    {
+      printf '%s\n' "$ISSUE_LINKS" | tr ',' '\n' | sed -E 's/^.*(https:\/\/github\.com\/[^" ]+).*$/\1/'
+      printf '%s\n' "$ISSUE_BODY" | grep -Eo 'https://github\.com/[^/]+/[^/]+/issues/[1-9][0-9]*' || true
+    } | grep -E '^https://github\.com/[^/]+/[^/]+/issues/[1-9][0-9]*$' | sort -u || true
+  )
+  ISSUE_URL=$ISSUE_CANDIDATES
+  ISSUE_GATE_REASON=
+  if [ -n "$ISSUE_LINKS" ] || [ -n "$ISSUE_BODY" ]; then
+    ISSUE_URL_COUNT=$(printf '%s\n' "$ISSUE_CANDIDATES" | awk 'NF { n++ } END { print n+0 }')
+    if [ "$ISSUE_URL_COUNT" != 1 ]; then
+      ISSUE_URL=$(printf '%s\n' "$ISSUE_CANDIDATES" | sed -n '1p')
+      ISSUE_GATE_REASON='issue link is ambiguous or malformed'
+    fi
+    ISSUE_URL=$(printf '%s\n' "$ISSUE_CANDIDATES" | sed -n '1p')
+    if [ -z "$ISSUE_GATE_REASON" ]; then
+      ISSUE_PART=${ISSUE_URL#https://github.com/}
+      ISSUE_NUMBER=${ISSUE_PART##*/}
+      ISSUE_REPO=${ISSUE_PART%/issues/*}
+      ISSUE_LABEL=${FM_ISSUE_VERIFIED_LABEL:-verified}
+      ISSUE_RESPONSE=$(GH_PROMPT_DISABLED=1 gh api "repos/$ISSUE_REPO/issues/$ISSUE_NUMBER" 2>/dev/null) || ISSUE_RESPONSE=
+      if [ -z "$ISSUE_RESPONSE" ] || ! printf '%s' "$ISSUE_RESPONSE" | jq -e '(.state == "open" or .state == "closed") and (.labels | type == "array") and all(.labels[]; (.name | type == "string"))' >/dev/null 2>&1; then
+        ISSUE_GATE_REASON='GitHub API/read failure'
+      elif [ "$(printf '%s' "$ISSUE_RESPONSE" | jq -r '.state')" != closed ]; then
+        ISSUE_GATE_REASON='issue is open'
+      elif ! printf '%s' "$ISSUE_RESPONSE" | jq -e --arg label "$ISSUE_LABEL" 'any(.labels[]; (.name | ascii_downcase) == ($label | ascii_downcase))' >/dev/null 2>&1; then
+        ISSUE_GATE_REASON="verified label absent: $ISSUE_LABEL"
+      fi
+    fi
+    ISSUE_OPEN=$(status_open_decisions "$STATE/$ID.status" "$KIND")
+    while IFS=$'\t' read -r issue_key issue_verb issue_note; do
+      [ "$issue_key" = issue-finalization ] && [ "$issue_verb" = blocked ] \
+        && [[ "$issue_note" = *"$ISSUE_URL"* ]] && ISSUE_FINALIZATION_BLOCKED=1
+    done <<EOF
+$ISSUE_OPEN
+EOF
+    if [ -n "$ISSUE_GATE_REASON" ] && [ "$ISSUE_FINALIZATION_BLOCKED" != 1 ]; then
+      echo "REFUSED: issue $ISSUE_URL is not finalized: $ISSUE_GATE_REASON" >&2
+      echo "Keep an open blocker keyed issue-finalization naming this exact issue URL and reason; --force does not bypass this gate." >&2
+      exit 1
+    fi
+    if [ "$ISSUE_FINALIZATION_BLOCKED" = 1 ]; then
+      echo "Issue-finalization blocker remains open for $ISSUE_URL ($ISSUE_GATE_REASON); backlog will remain incomplete." >&2
+      BACKLOG_TRANSITION=retain
+    fi
+  fi
 # (truncate is not, and is absent on stock macOS) - and verifies the restored
 # size before reporting success, so a rollback that cannot be proven complete
 # is reported as not rolled back.
