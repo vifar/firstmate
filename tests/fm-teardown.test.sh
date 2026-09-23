@@ -841,6 +841,19 @@ test_issue_finalization_non_issue_link_unchanged() {
   [ "$(backlog_row_state "$case_dir")" = "done" ] || fail "unlinked task was not completed"
   pass "task without issue link retains existing completion behavior"
 }
+
+test_issue_finalization_prose_without_issue_url_allows_teardown() {
+  local case_dir
+  case_dir=$(make_case issue-prose-no-link)
+  write_meta "$case_dir" no-mistakes ship
+  seed_backlog_in_flight "$case_dir"
+  tasks-axi update task-x1 --title "teardown fixture task" --body "finished implementation and verified behavior" --file "$case_dir/data/backlog.md" >/dev/null
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "prose without an issue URL should not gate teardown: $(cat "$case_dir/stderr")"
+  [ "$(backlog_row_state "$case_dir")" = done ] || fail "prose-only task was not completed"
+  pass "ship task prose without an issue URL permits teardown"
+}
+
 test_teardown_closes_the_backlog_item_itself() {
   case_dir=$(make_case tasks-axi-close)
   write_meta "$case_dir" no-mistakes ship
@@ -4062,5 +4075,6 @@ test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
 test_issue_finalization_gate_refuses_unfinished_link
 test_issue_finalization_closed_verified_allows_teardown
+test_issue_finalization_prose_without_issue_url_allows_teardown
 test_issue_finalization_matching_blocker_retains_backlog
 test_issue_finalization_non_issue_link_unchanged

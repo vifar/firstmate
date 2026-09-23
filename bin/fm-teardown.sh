@@ -3411,7 +3411,7 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ] && [ "$KIND" = ship ]; then
   )
   ISSUE_URL=$ISSUE_CANDIDATES
   ISSUE_GATE_REASON=
-  if [ -n "$ISSUE_LINKS" ] || [ -n "$ISSUE_BODY" ]; then
+  if [ -n "$ISSUE_CANDIDATES" ]; then
     ISSUE_URL_COUNT=$(printf '%s\n' "$ISSUE_CANDIDATES" | awk 'NF { n++ } END { print n+0 }')
     if [ "$ISSUE_URL_COUNT" != 1 ]; then
       ISSUE_URL=$(printf '%s\n' "$ISSUE_CANDIDATES" | sed -n '1p')
