@@ -143,6 +143,19 @@ test_scout_batch_refuses_delivery_flags() {
   pass "scout batch refuses ship delivery flags instead of ignoring them"
 }
 
+# A ship without its required project positional reaches the actionable path refusal.
+test_ship_requires_project_positional() {
+  local out status
+  out=$(run_spawn nope-no-project-z13 --mode direct-PR --yolo off --harness omp 2>&1)
+  status=$?
+  printf '%s\n' "$out" | grep -F 'error: task nope-no-project-z13 has no project; pass the project directory as the second positional argument' >/dev/null \
+    || fail "missing project refusal did not name the task and missing project: $out"
+  printf '%s\n' "$out" | grep -F 'unbound variable' >/dev/null \
+    && fail "missing project refusal exposed a shell unbound-variable error"
+  pass "ship spawn without project reports the actionable refusal"
+}
+
+test_ship_requires_project_positional
 test_batch_dispatches_every_pair
 test_batch_mode_boundaries
 test_batch_requires_the_shared_delivery_contract

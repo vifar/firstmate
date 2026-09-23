@@ -1749,7 +1749,11 @@ elif [ "$KIND" = secondmate ]; then
     ;;
   esac
 else
-  PROJ=${POS[1]}
+  PROJ=${POS[1]:-}
+  [ -n "$PROJ" ] || {
+    echo "error: task $ID has no project; pass the project directory as the second positional argument" >&2
+    exit 1
+  }
   ARG3=${POS[2]:-}
 fi
 [ -z "$HARNESS_ARG" ] || ARG3=$HARNESS_ARG
