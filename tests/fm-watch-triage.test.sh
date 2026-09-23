@@ -5515,7 +5515,7 @@ SH
   for mode in error unavailable live missing malformed unknown unverified; do
     fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
     case "$mode" in
-      malformed) printf 'window=test:fm-other\n' >> "$state/live.meta" ;;
+      malformed) printf 'window=test:fm-live\n' >> "$state/live.meta" ;;
       unknown) printf 'backend=unknown\n' >> "$state/live.meta" ;;
       unverified)
         fm_write_meta "$state/live.meta" "window=fm-live" "endpoint_task_id=live" \
@@ -5523,6 +5523,7 @@ SH
           "worktree=$dir/wt" "project=$dir/project"
         ;;
     esac
+    rm -f "$state/.watch-record-sweep-cursor"
     for marker in hash count stale stale-since paused paused-rechecked paused-resurfaced wedge-escalations churn-since writing-since writing-resurfaced; do
       printf 'preserve-%s\n' "$marker" > "$state/.$marker-test_fm-live"
       touch -t 200001010000 "$state/.$marker-test_fm-live"
@@ -5593,18 +5594,47 @@ SH
   pass "watcher honors grace and rechecks absence and record age before unlink"
 }
 
+test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta() {
+  local dir state fakebin
+  dir=$(make_case watch-record-sweep-seen); state="$dir/state"; fakebin="$dir/fakebin"
+  fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
+  printf 'window=none\n' > "$state/malformed.meta"
+  printf 'window=test:fm-dead\nworktree=$dir/dead-wt\nproject=$dir/project\n' > "$state/dead.meta"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then printf 'fm-live\n'; exit 0; fi
+exit 1
+SH
+  chmod +x "$fakebin/tmux"
+  : > "$state/.seen-dead_status"
+  : > "$state/.seen-dead_turn-ended"
+  : > "$state/.hash-test_fm-dead"
+  for marker in "$state"/.seen-* "$state"/.hash-*; do touch -t 200001010000 "$marker"; done
+  printf '%s\n' '.stale-default_w5E_p2' > "$state/.watch-record-sweep-cursor"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
+    || fail "watcher sweep failed with an unrelated invalid meta record"
+  assert_absent "$state/.seen-dead_status" "dead task status suppressor was not reclaimed"
+  assert_absent "$state/.seen-dead_turn-ended" "dead task turn-end suppressor was not reclaimed"
+  assert_absent "$state/.hash-test_fm-dead" "dead task hash was not reclaimed"
+  pass "sweep wraps past its cursor, reclaims dead-task seen markers, and ignores unrelated invalid metadata"
+}
 if [ "${1:-}" = --watch-record-sweep ]; then
   test_watcher_retires_dead_window_records_and_preserves_live_key
   test_watcher_record_sweep_is_bounded_and_idempotent
   test_watcher_record_sweep_requires_proven_absence
   test_watcher_record_sweep_grace_and_recheck
+  test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta
   exit 0
 fi
 
+
+test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta
 test_watcher_retires_dead_window_records_and_preserves_live_key
 test_watcher_record_sweep_is_bounded_and_idempotent
 test_watcher_record_sweep_requires_proven_absence
 test_watcher_record_sweep_grace_and_recheck
+test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
 test_status_span_respects_decision_closure
