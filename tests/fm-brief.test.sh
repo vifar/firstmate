@@ -217,6 +217,13 @@ test_ship_modes_generate_clean_briefs() {
     assert_grep "mid-task \`working:\` line (including setup complete) is nonterminal" "$brief" \
       "$id: brief missing nonterminal working:/setup-complete gate protection"
     assert_no_grep "EOF" "$brief" "$id: brief leaked a heredoc EOF marker (unterminated heredoc)"
+    for requirement in 'consumer-visible behavior' 'meaningful boundaries, transitions, and errors' 'Remove existing tests that violate this bar' 'dead code, speculative surface, and redundant indirection' 'file:line evidence'; do
+      assert_grep "$requirement" "$brief" "$id: generated ship brief missing quality requirement: $requirement"
+    done
+    if [ "$mode" != local-only ]; then
+      assert_grep 'complete PR check set' "$brief" "$id: generated PR brief missing complete check reporting requirement"
+      assert_grep 'unresolved review threads' "$brief" "$id: generated PR brief missing review-thread reporting requirement"
+    fi
   done
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }

@@ -549,9 +549,8 @@ $RULE1
    Use \`blocked [key=<work-slug>]: {evidence}; next: {one concrete next action}\` when firstmate must act.
    Use \`needs-decision [key=<work-slug>]: {question and options}; next: {captain choice or firstmate action}\` when a decision belongs above the worker.
    Backward-compatible lines without \`next:\` remain valid, but never omit the concrete next action on new blocker or decision reports.
-   5. If you hit the same obstacle twice, append \`blocked [key=<work-slug>]: {evidence}; next: firstmate investigates the recorded blocker\` and stop; firstmate will help.
-   6. If a decision belongs above the implementation worker (product choices, destructive actions),
-   append \`needs-decision [key=<work-slug>]: {summary of options}; next: captain chooses an option\` and stop. Firstmate will reply with the decision.
+   5. If you hit the same obstacle twice, report that firstmate must investigate the recorded blocker and stop; firstmate will help.
+   6. If a decision belongs above the implementation worker (product choices, destructive actions), summarize the options for firstmate and stop. Firstmate will reply with the decision.
 ${ASK_USER_BLOCK}
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.

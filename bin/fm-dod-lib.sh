@@ -255,10 +255,13 @@ fm_dod_block() {  # <mode> <task-id>
 Delivery contract: mode=direct-PR
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
-When it is implemented and committed, push your branch and open a PR with \`gh-axi\` that is ready for review, not a draft.
+When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
+Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
+Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
+When it is implemented and committed, push your branch and open a PR with `gh-axi` that is ready for review, not a draft.
 Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
-Then append \`done [at=<epoch>]: PR {url}\` to the status file and stop.
+Then report your completed PR with its full URL in the status file and stop.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
@@ -269,6 +272,8 @@ EOF
 Delivery contract: mode=local-only
 This task ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$id\`. Do NOT push, do NOT open a PR, do NOT merge.
+When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
+Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done [at=<epoch>]: ready in branch fm/$id\` to the status file and stop.
 The configured merge authority approves the ready branch, then firstmate merges it into local \`main\` through the guarded fast-forward path.
@@ -279,6 +284,9 @@ EOF
 # Definition of done
 Delivery contract: mode=no-mistakes
 The task is complete only when committed on your branch.
+When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
+Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
+Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
 When you believe it is complete, append \`done [at=<epoch>]: {summary}\` to the status file and stop.
 Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
 
