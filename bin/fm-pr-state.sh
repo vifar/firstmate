@@ -8,7 +8,7 @@
 # Every rollup entry is enumerated; the summary counts pass, fail, pending, and
 # skipped entries separately. An absent required context cannot be enumerated.
 # Review-thread pagination is complete before output; unresolved threads are
-# listed by node id and URL. Lookup or malformed-data errors exit nonzero.
+# listed by node id and file location. Lookup or malformed-data errors exit nonzero.
 # A closed or merged pull request reports that terminal state and nothing else.
 #
 # Usage: fm-pr-state.sh <pr-url>
@@ -111,15 +111,15 @@ printf '%s\n' "$CHECKS" | jq -r '
   , ($all[] | "CHECK: \(check_label) status=\(if .__typename == "CheckRun" then .status + "/" + (.conclusion // "") else .state end)")'
 
 # shellcheck disable=SC2016
-THREADS=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved url} pageInfo{hasNextPage endCursor}}}}}' \
+THREADS=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved path line} pageInfo{hasNextPage endCursor}}}}}' \
   -f owner="${PATH_PART%%/*}" -f name="${PATH_PART#*/}" -F number="$NUMBER" --paginate --slurp) \
   || die "could not read review threads for $URL"
 printf '%s\n' "$THREADS" | jq -e 'type == "array" and all(.[]; .data.repository.pullRequest.reviewThreads.nodes | type == "array")' >/dev/null \
   || die "GitHub returned malformed review threads for $URL"
 printf '%s\n' "$THREADS" | jq -r '
-  [ .[] | .data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id:(.id // ""), url:(.url // "")} ] as $open
+  [ .[] | .data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id:(.id // ""), path:(.path // ""), line:(.line // 0)} ] as $open
   | "REVIEW THREADS: unresolved=\($open|length)"
-  , ($open[] | "UNRESOLVED THREAD: id=\(.id) url=\(.url)")'
+  , ($open[] | "UNRESOLVED THREAD: id=\(.id) path=\(.path) line=\(.line)")'
 
 if [ "$REVIEW_DECISION" = CHANGES_REQUESTED ]; then
   printf 'REVIEW DECISION: CHANGES_REQUESTED\n'
