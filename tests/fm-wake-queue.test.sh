@@ -2009,6 +2009,34 @@ test_historical_annotation_skips_announced_status() {
   pass "historical annotations replay nothing already announced and keep everything new"
 }
 
+test_lock_acquire_bounds_unwritable_state_failure() {
+  local dir state fakebin err start elapsed rc
+  dir=$(make_case unwritable-lock-state)
+  state="$dir/state"
+  mkdir -p "$state" "$dir/bin"
+  fakebin="$dir/bin"
+  cat > "$fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$fakebin/mktemp"
+  err="$dir/lock.err"
+  start=$(date +%s)
+  rc=0
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    fm_lock_try_acquire "$2/.lock" || exit $?
+    exit 0
+  ' _ "$ROOT/bin/fm-wake-lib.sh" "$state" 2>"$err" || rc=$?
+  elapsed=$(($(date +%s) - start))
+  [ "$rc" -ne 0 ] || fail "lock acquisition unexpectedly succeeded when owner-directory creation fails"
+  [ "$elapsed" -lt 3 ] || fail "lock acquisition took ${elapsed}s when owner-directory creation fails"
+  grep -F 'unable to create steal lock' "$err" >/dev/null \
+    || fail "bounded lock failure did not explain the state-directory problem: $(cat "$err")"
+  pass "lock acquisition fails promptly with a clear error when owner-directory creation fails"
+}
+
+test_lock_acquire_bounds_unwritable_state_failure
 test_self_held_lock_reclaims_instead_of_deadlocking
 test_subshell_lock_ownership_without_bashpid
 test_bounded_lock_handoff_after_contention
