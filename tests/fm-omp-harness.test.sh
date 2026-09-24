@@ -28,7 +28,8 @@
 #   6. The turn-end guard extension compels one continuation on exit 2 and
 #      stands down when the payload already carries stop_hook_active.
 #   7. The watch extension arms through fm_watch_arm_omp and delivers an
-#      actionable close as one follow-up.
+#      actionable close as one follow-up, restoring continuity through a
+#      successor arm bounded by FM_WATCH_REARM_RETRY_LIMIT.
 set -u
 
 # shellcheck source=tests/fixtures.sh
@@ -644,6 +645,120 @@ EOF
   pass ".omp watch extension: fm_watch_arm_omp arms once, repeats as a no-op, and delivers an actionable close as one follow-up"
 }
 
+# Hole 3: an actionable close is delivered by first restoring continuity through
+# a successor arm, and that restore path is bounded by FM_WATCH_REARM_RETRY_LIMIT.
+# A bound that is referenced but never defined throws a ReferenceError on the
+# FIRST evaluation, so the ladder launches nothing and the wake degrades into a
+# delivery failure - supervision stays down and the operator sees the delivery
+# failure rather than the real cause. Nothing that loads the extension normally
+# can see this: only an actionable close enters the retry ladder at all. So the
+# test drives one and reads the ladder's real effects - how many successor arms
+# were launched, that the successor that came up was verified, and that the
+# surfaced bound is the configured override rather than a literal.
+test_watch_extension_honors_rearm_retry_bound() {
+  local repo home out status
+  repo="$TMP_ROOT/retry-bound/repo"; home="$TMP_ROOT/retry-bound/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The close's work must still be live at delivery time: the check script is
+  # already retired when a merged poll wakes, so its record stands in.
+  printf 'window=default:w2C:p1\nharness=omp\n' > "$home/state/retry-q1.meta"
+  # The first arm closes with one actionable reason, which is what enters the
+  # restore ladder. Successors read their behavior from a mode file: under
+  # "partial" only the first successor attempt is unready and the second verifies
+  # a live watcher, so the ladder succeeds inside its bound. Every arm invocation
+  # records itself, and a delivered handling confirmation is recorded with the
+  # recovery generation and watcher pid it verified.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+state=${FM_HOME:?}/state
+if [ "${1:-}" = --handling-delivered ]; then
+  printf '%s %s\n' "${2:-}" "${4:-}" >> "$state/arm-confirm.log"
+  exit 0
+fi
+printf 'launch\n' >> "$state/arm-launches.log"
+count=$(wc -l < "$state/arm-launches.log" | tr -d ' ')
+if [ "$count" = 1 ]; then
+  printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
+  sleep 1
+  printf 'check: %s/retry-q1.check.sh: merged\n' "$state"
+  exit 0
+fi
+mode=$(cat "$state/arm-mode" 2>/dev/null || printf partial)
+case "$mode" in
+  partial) [ "$count" -gt 2 ] || { printf 'watcher: FAILED - arm cycle could not confirm a fresh watcher beacon\n'; exit 1; } ;;
+  exhaust) printf 'watcher: FAILED - arm cycle could not confirm a fresh watcher beacon\n'; exit 1 ;;
+esac
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-2\n' "$$"
+printf '%s\n' "$$" > "$state/arm-child.pid"
+exec sleep 30
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  printf 'partial\n' > "$home/state/arm-mode"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=2 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+const bound = Number(process.env.FM_WATCH_REARM_RETRY_LIMIT);
+mkdirSync(state, { recursive: true });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); const sent = [];
+let tool = null;
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool(t) { tool = t; },
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+const waitUntil = async (predicate, label) => {
+  const deadline = Date.now() + 8000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+const launches = () => {
+  try { return readFileSync(`${state}/arm-launches.log`, "utf8").trim().split("\n").filter(Boolean).length; } catch { return 0; }
+};
+const retryNotices = () => sent.filter((wake) => wake.m.includes("could not restore watcher continuity"));
+await handlers.get("session_start")({ type: "session_start" }, {});
+// Phase A: the actionable close enters the restore ladder, whose first successor
+// is unready and whose second verifies a live watcher. A bound that cannot be
+// evaluated launches nothing at all and delivers a failure instead.
+await tool.execute();
+await waitUntil(() => sent.length >= 1, "the actionable wake");
+if (launches() !== 3) throw new Error(`the restore ladder launched ${launches()} arms, expected the first arm plus two successor attempts`);
+if (retryNotices().length !== 0) throw new Error(`a restore that succeeded inside the bound still reported a failure: ${JSON.stringify(sent.map((wake) => wake.m))}`);
+if (!sent[0].m.includes(`FIRSTMATE WATCHER WAKE: check: ${state}/retry-q1.check.sh: merged`)) throw new Error(`the actionable close was not delivered cleanly: ${sent[0].m}`);
+if (sent[0].o?.deliverAs !== "followUp") throw new Error("the restored wake must be delivered as a follow-up");
+const childPid = readFileSync(`${state}/arm-child.pid`, "utf8").trim();
+if (readFileSync(`${state}/arm-confirm.log`, "utf8").trim() !== `gen-2 ${childPid}`) {
+  throw new Error(`the successor arm was not verified as the live watcher: ${JSON.stringify(readFileSync(`${state}/arm-confirm.log`, "utf8"))}`);
+}
+// Phase B: every later successor stays unready, so the ordinary ladder must stop
+// exactly at the configured bound and name it. A failed verified successor is
+// what starts this ladder, matching the path a dead watcher takes.
+writeFileSync(`${state}/arm-mode`, "exhaust\n");
+process.kill(Number(childPid), "SIGTERM");
+await waitUntil(() => retryNotices().length >= 1, "the exhausted-bound notice");
+if (retryNotices().length !== 1) throw new Error(`the ladder surfaced ${retryNotices().length} notices: ${JSON.stringify(retryNotices().map((wake) => wake.m))}`);
+if (!retryNotices()[0].m.includes(`could not restore watcher continuity after ${bound} retries`)) {
+  throw new Error(`the surfaced bound is not the configured override: ${retryNotices()[0].m}`);
+}
+if (launches() !== 3 + bound) throw new Error(`a bound of ${bound} launched ${launches() - 3} further arms instead of ${bound}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch restore retry bound: $out"
+  [ -z "$out" ] || fail "omp watch restore retry bound test printed output: $out"
+  pass ".omp watch extension: an actionable close restores continuity through a verified successor inside FM_WATCH_REARM_RETRY_LIMIT, and the ladder stops and names the configured bound"
+}
+
 test_watch_extension_bounds_replacement_handoff() {
   local repo home out status
   repo="$TMP_ROOT/handoff/repo"; home="$TMP_ROOT/handoff/home"
@@ -1028,6 +1143,9 @@ await handlers.get("session_start")({ type: "session_start" }, {});
 await new Promise((resolve) => setTimeout(resolve, 750));
 const replayed = sent.map((wake) => wake.m);
 const sawAny = (needle) => replayed.some((text) => text.includes(needle));
+// The delivered close line, exactly: a coalesced close carries the other
+// records as text, so a substring count would read one delivery twice.
+const wakeLine = (text) => text.split("\n", 1)[0].replace(/^.*FIRSTMATE WATCHER WAKE: /, "");
 // Hole 1: an unresolvable stale close for a task with no meta is dead work.
 if (sawAny("stale: default:w4Z:p2")) {
   throw new Error(`a stale close for a task with no meta was replayed: ${JSON.stringify(replayed)}`);
@@ -1060,16 +1178,20 @@ for (const [needle, label] of [
   [`signal: ${state}/live-signal-q1.turn-ended ${state}/orphan-q1.status`, "a coalesced signal close with live and torn-down tasks"],
   ["stale: default:wAB:p1", "a stale close for a window whose task id starts with dash"],
 ]) {
-  const count = replayed.filter((text) => text.includes(needle)).length;
+  const count = replayed.filter((text) => wakeLine(text) === needle).length;
   if (count !== 1) throw new Error(`${label} must replay exactly once, saw ${count}: ${JSON.stringify(replayed)}`);
 }
 if (readHandoff().length !== 9) throw new Error(`live closes must remain pending consumption, saw ${readHandoff().length} records`);
 // Consuming a live replayed close removes exactly that record: a genuinely
 // pending close still replays once across a replacement and is not duplicated.
-const liveText = sent.find((wake) => wake.m.includes("live-signal-q1.turn-ended")).m;
+// The plain record, not the coalesced close that also carries its line.
+const liveText = sent.find((wake) => wakeLine(wake.m) === `signal: ${state}/live-signal-q1.turn-ended`).m;
 await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: liveText }, {});
 if (readHandoff().length !== 8) throw new Error(`a consumed close must leave the store, saw ${readHandoff().length} records`);
-if (readHandoff().some((item) => item.message.includes("live-signal-q1"))) throw new Error("the consumed close rode the store again");
+// Only that one record left: the coalesced close beside it carries the same
+// line as text and must stay pending on its own account.
+if (readHandoff().some((item) => item.message === `signal: ${state}/live-signal-q1.turn-ended`)) throw new Error("the consumed close rode the store again");
+if (!readHandoff().some((item) => item.message === `signal: ${state}/live-signal-q1.turn-ended ${state}/orphan-q1.status`)) throw new Error("consuming one close also dropped the coalesced close beside it");
 await handlers.get("session_shutdown")({}, {});
 process.exit(0);
 EOF
@@ -1431,6 +1553,7 @@ test_control_composer_and_model_tables
 test_ownership_proof_is_omp_keyed
 test_turnend_guard_extension_compels_one_continuation
 test_watch_extension_arms_and_delivers
+test_watch_extension_honors_rearm_retry_bound
 test_watch_extension_bounds_replacement_handoff
 test_watch_extension_gates_close_liveness
 test_watch_extension_gates_non_replacement_delivery

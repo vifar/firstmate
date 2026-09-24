@@ -178,6 +178,7 @@ const actionableHandoff = `${handoffDir}/session-replacement-actionable.json`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
+const retryLimit = positiveInteger("FM_WATCH_REARM_RETRY_LIMIT", 5);
 // A delivered close stays replayable while omp may still consume it, then expires
 // so an idle never-consumed follow-up cannot schedule supervision forever.
 const unconsumedCloseTtlMs = positiveInteger("FM_OMP_UNCONSUMED_CLOSE_TTL_MS", 60_000);
