@@ -1,0 +1,8 @@
+not ok - omp watch restore retry bound: file:///Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3A1NB4AE35PQ8NKS1X3XPTZ/[eval1]:34
+if (launches() !== 3) throw new Error(`the restore ladder launched ${launches()} arms, expected the first arm plus two successor attempts`);
+                            ^
+
+Error: the restore ladder launched 1 arms, expected the first arm plus two successor attempts
+    at file:///Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3A1NB4AE35PQ8NKS1X3XPTZ/[eval1]:34:29
+
+Node.js v26.9.0: expected exit 0, got 1

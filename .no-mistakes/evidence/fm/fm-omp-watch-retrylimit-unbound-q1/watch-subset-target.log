@@ -1,0 +1,15 @@
+ok - .omp watch extension: fm_watch_arm_omp arms once, repeats as a no-op, and delivers an actionable close as one follow-up
+ok - .omp watch extension: an actionable close restores continuity through a verified successor inside FM_WATCH_REARM_RETRY_LIMIT, and the ladder stops and names the configured bound
+ok - .omp watch extension: the replacement handoff is capped and fresh, an old close is dropped at session start, and a genuinely pending close still replays once
+ok - .omp watch extension: a close for finished work is dropped for every kind, while live work still replays exactly once
+ok - .omp watch extension: an ordinary non-replacement close is liveness-checked too, and live work still delivers
+ok - .omp watch extension: a close that outlived its replacement window is retired instead of re-delivered, while live work still delivers
+not ok - omp watch unconsumed close expiry: file:///Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3A1NB4AE35PQ8NKS1X3XPTZ/[eval1]:24
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+                                      ^
+
+Error: timed out waiting for the expired close to leave the handoff store
+    at waitUntil (file:///Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3A1NB4AE35PQ8NKS1X3XPTZ/[eval1]:24:39)
+    at async file:///Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3A1NB4AE35PQ8NKS1X3XPTZ/[eval1]:29:1
+
+Node.js v26.9.0: expected exit 0, got 1

@@ -1,0 +1,5 @@
+OBSERVED FAILURE WAKE:
+⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: watcher: FAILED - omp extension could not deliver an actionable wake
+retryLimit is not defined
+
+Run bin/fm-wake-drain.sh first and handle the queued wake. After handling the drain output, proactively summarize to the captain any decision, blocker, failure, terminal outcome, or review-ready result before running the printed acknowledgement. Watcher continuity is extension-owned.

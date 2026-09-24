@@ -1,0 +1,1 @@
+ok - .omp watch extension: with no FM_WATCH_REARM_RETRY_LIMIT override the retry ladder stops at the declared default of 5 and names it
