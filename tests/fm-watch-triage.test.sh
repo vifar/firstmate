@@ -5619,12 +5619,74 @@ SH
   assert_absent "$state/.hash-test_fm-dead" "dead task hash was not reclaimed"
   pass "sweep wraps past its cursor, reclaims dead-task seen markers, and ignores unrelated invalid metadata"
 }
+
+# A finished task's `state/<id>.turn-ended` marker is the notification that keeps
+# re-arming itself: the sweep reclaimed the task's `.seen-<id>_turn-ended` ledger
+# but left the marker, so the next scan_signals pass saw an unrecorded marker and
+# queued it as a fresh wake - once per poll, forever, for a task with no meta, no
+# backlog row, no live pane, and no remaining work. The wake is not just stale, it
+# crowds out genuine signals and must be drained and acknowledged every cycle.
+test_watcher_record_sweep_retires_orphan_turn_end_markers() {
+  local dir state fakebin marker
+  dir=$(make_case watch-record-sweep-orphan-marker); state="$dir/state"; fakebin="$dir/fakebin"
+  # A task that still has its endpoint record keeps its marker, and that holds
+  # even when its pane is provably gone: a record with no live window is a task
+  # awaiting recovery, not an orphan, and its marker must survive untouched.
+  fm_write_meta "$state/live.meta" "window=test:fm-live" "worktree=$dir/wt" "project=$dir/project"
+  : > "$state/live.turn-ended"
+  : > "$state/live.status"
+  printf 'window=test:fm-gone\nworktree=%s/gone-wt\nproject=%s/project\n' "$dir" "$dir" > "$state/gone.meta"
+  : > "$state/gone.turn-ended"
+
+  # The reported shape: a finished task with a surviving marker and no record at
+  # all - no meta, no live pane, no remaining work.
+  : > "$state/orphan-q1.turn-ended"
+  : > "$state/orphan-q1.status"
+  : > "$state/.seen-orphan-q1_turn-ended"
+  for marker in "$state"/*.turn-ended "$state"/*.status "$state"/*.meta "$state"/.seen-*; do
+    touch -t 200001010000 "$marker"
+  done
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = list-windows ]; then printf 'fm-live\n'; exit 0; fi
+if [ "${1:-}" = display-message ]; then
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -t ] && [ "${2:-}" = test:fm-live ]; then exit 0; fi
+    shift
+  done
+  exit 1
+fi
+if [ "${1:-}" = capture-pane ]; then printf 'idle pane\n'; exit 0; fi
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; retire_dead_window_records; retire_dead_window_records' _ "$WATCH" \
+    || fail "orphan-marker sweep failed"
+  assert_absent "$state/orphan-q1.turn-ended" "a finished task's orphan turn-end marker survived the sweep"
+  assert_absent "$state/.seen-orphan-q1_turn-ended" "the orphan's seen ledger survived the sweep"
+  assert_present "$state/live.turn-ended" "the sweep removed a live task's turn-end marker"
+  assert_present "$state/gone.turn-ended" "the sweep removed the marker of a task whose record still exists"
+  assert_present "$state/orphan-q1.status" "the sweep removed an ordinary status log it does not own"
+
+  # The loop itself. scan_signals is what re-queued the marker on every poll, so
+  # the assertion is made against it rather than against the sweep alone: had the
+  # marker survived with its ledger reclaimed, it would read as an unreported
+  # signal for a task that no longer exists.
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    bash -c '. "$1"; scan_signals' _ "$WATCH" > "$dir/scan.out" || fail "post-sweep signal scan failed"
+  grep -F 'orphan-q1.turn-ended' "$dir/scan.out" >/dev/null \
+    && fail "the sweep left a finished task's turn-end marker re-queueable: $(cat "$dir/scan.out")"
+  pass "sweep retires orphan turn-end markers, preserves a live or recorded task's, and ends the re-queue loop"
+}
+
 if [ "${1:-}" = --watch-record-sweep ]; then
   test_watcher_retires_dead_window_records_and_preserves_live_key
   test_watcher_record_sweep_is_bounded_and_idempotent
   test_watcher_record_sweep_requires_proven_absence
   test_watcher_record_sweep_grace_and_recheck
   test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta
+  test_watcher_record_sweep_retires_orphan_turn_end_markers
   exit 0
 fi
 
@@ -5635,6 +5697,7 @@ test_watcher_record_sweep_is_bounded_and_idempotent
 test_watcher_record_sweep_requires_proven_absence
 test_watcher_record_sweep_grace_and_recheck
 test_watcher_record_sweep_reclaims_seen_markers_and_skips_unrelated_invalid_meta
+test_watcher_record_sweep_retires_orphan_turn_end_markers
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
 test_status_span_respects_decision_closure

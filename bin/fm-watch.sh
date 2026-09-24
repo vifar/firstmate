@@ -818,21 +818,61 @@ watch_record_window_absent() {
   return 0
 }
 
+# A `.turn-ended` marker is the task's OWN wake notification rather than one
+# window's bookkeeping, so it is orphaned only when its task's endpoint record
+# is gone, matching this sweep's existing rule that "keys with no remaining task
+# metadata are eligible after the same grace period"
+# (docs/watcher-continuity.md "Retiring window bookkeeping").
+# That is deliberately STRICTER than watch_record_window_absent, which licenses
+# removing window-scoped bookkeeping once the window is provably gone even
+# while the task record stands: a task that still has its record is still a task
+# - live, idle, paused, finished-but-not-cleaned, or broken - and its marker
+# must be left completely alone.
+# This is the half that bounds the re-queue loop: the same sweep reclaims the
+# task's `.seen-*` ledger, so without retiring the marker too, the next
+# scan_signals pass finds an unrecorded marker, queues it as a fresh wake, and
+# a finished task re-announces itself once per poll forever.
+watch_record_task_record_absent() {  # <task-id>
+  local task=$1 meta
+  case "$task" in ''|*/*) return 1 ;; esac
+  meta="$STATE/$task.meta"
+  [ ! -e "$meta" ] && [ ! -L "$meta" ]
+}
+
 retire_dead_window_records() {
   local key file base cursor='' processed=0
   [ ! -f "$STATE/.watch-record-sweep-cursor" ] \
     || IFS= read -r cursor < "$STATE/.watch-record-sweep-cursor" \
     || cursor=''
-  for file in "$STATE"/.*-* "$STATE"/.seen-*_status "$STATE"/.seen-*_turn-ended; do
+  for file in "$STATE"/.*-* "$STATE"/.seen-*_status "$STATE"/.seen-*_turn-ended "$STATE"/*.turn-ended; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     base=${file##*/}
     [ -z "$cursor" ] || [[ $base > $cursor ]] || continue
-    key=$(watch_record_key_from_file "$base") || continue
-    if watch_record_past_grace "$file" \
-      && watch_record_window_absent "$key" \
-      && watch_record_past_grace "$file"; then
-      rm -f -- "$file" || return 1
-    fi
+    # Dot-prefixed names are window-scoped bookkeeping and per-task seen
+    # ledgers; a bare `<id>.turn-ended` is the task's own wake marker. The
+    # leading dot is the discriminator, and it is load-bearing: a
+    # `.seen-<id>_turn-ended` LEDGER also ends in the same text, and deleting it
+    # as if it were a marker would strand the real marker as an unrecorded
+    # signal - exactly the re-queue loop this sweep exists to end. The
+    # `*.turn-ended` glob cannot match a dot-prefixed name at all, so both the
+    # glob and this case keep the two families apart.
+    case "$base" in
+      .*)
+        key=$(watch_record_key_from_file "$base") || continue
+        if watch_record_past_grace "$file" \
+          && watch_record_window_absent "$key" \
+          && watch_record_past_grace "$file"; then
+          rm -f -- "$file" || return 1
+        fi
+        ;;
+      *.turn-ended)
+        if watch_record_past_grace "$file" \
+          && watch_record_task_record_absent "${base%.turn-ended}" \
+          && watch_record_past_grace "$file"; then
+          rm -f -- "$file" || return 1
+        fi
+        ;;
+    esac
     processed=$((processed + 1))
     printf '%s\n' "$base" > "$STATE/.watch-record-sweep-cursor" || return 1
     [ "$processed" -lt 64 ] || return 0

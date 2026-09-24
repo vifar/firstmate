@@ -34,6 +34,12 @@ Keys with no remaining task metadata are eligible after the same grace period.
 The watcher checks the file age again after the endpoint probe to protect bookkeeping refreshed during that probe.
 Missing files are no-ops, and durable task and teardown records are outside this sweep.
 
+The sweep also retires an orphaned `state/<id>.turn-ended` marker, the one wake notification whose survival made a finished task re-announce itself forever.
+The marker is retired only when the task has no remaining `state/<id>.meta`, under the same grace and recheck bounds above - deliberately stricter than the window-key rule, which retires window-scoped bookkeeping for a task whose record still stands.
+A task with a record keeps its marker whether its endpoint is live, idle, paused, or provably gone, because such a task is still a task awaiting recovery rather than an orphan.
+Retiring the marker is what ends the loop: the sweep also reclaims that task's `.seen-<id>_turn-ended` ledger, so a marker left behind would read as an unreported signal and be queued afresh once per poll.
+Durable `state/<id>.status` logs are never touched by this sweep.
+
 This is best-effort cleanup, not atomic coordination with respawn.
 The grace period protects new and recently updated bookkeeping, and the immediate checks narrow the race, but an endpoint or file can still change between the last check and unlink.
 Old bookkeeping for a concurrently revived endpoint can therefore still be retired in that residual interval.
