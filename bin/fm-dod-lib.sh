@@ -266,7 +266,9 @@ Verify the PR assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the c
 A draft cannot be merged, so a done report on one leaves the merge unasked.
 Independently read the PR's complete check set and unresolved review-thread state from the forge; enumerate every check and report total/pass/fail/pending counts and every unresolved thread, never a required-only or otherwise partial subset.
 Use \`bin/fm-pr-state.sh <url>\` for the independent current-state read and require it to finish successfully; an unreadable or incomplete result is not a green claim.
-Then append \`done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>\` with all unresolved thread identifiers/details, and stop.
+Then append \`done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>\` with all unresolved thread identifiers/details FIRST.
+Because a state read uses the newest line, immediately append \`paused [at=<epoch>]: awaiting the captain's merge decision; next: firstmate rechecks the PR; until <YYYY-MM-DDTHH:MMZ>\` LAST, using a future UTC timestamp; this bounded pause is mandatory whenever the PR is open and not merged.
+Stopping after the \`done\` line without this bounded pause leaves the lane reading terminal and eligible for automatic reaping.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
@@ -326,8 +328,9 @@ After /no-mistakes reports CI green (the CI-ready return point - do not wait for
 Verify its assignee with \`gh pr view "\$PR_URL" --json assignees\`; if the captain's account is not assigned, discover the repository owner with \`gh repo view --json owner\` and correct it with \`gh pr edit "\$PR_URL" --add-assignee "\$OWNER"\` before reporting done.
 A draft cannot be merged, so do not report done while it remains a draft.
 Independently read the complete current check set and unresolved review-thread state from the forge; enumerate every check and report total/pass/fail/pending counts and every unresolved thread, never a required-only or otherwise partial subset.
-Use \`bin/fm-pr-state.sh <url>\` for this read and require it to finish successfully; an unreadable or incomplete result is not a green claim.
-Then append \`done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>\` with all unresolved thread identifiers/details, and stop. You are finished.
+Then append \`done [at=<epoch>]: PR {url} checks=<total> pass=<pass> fail=<fail> pending=<pending> unresolved-threads=<count>\` with all unresolved thread identifiers/details FIRST.
+Because a state read uses the newest line, immediately append \`paused [at=<epoch>]: awaiting the captain's merge decision; next: firstmate rechecks the PR; until <YYYY-MM-DDTHH:MMZ>\` LAST, using a future UTC timestamp; this bounded pause is mandatory whenever the PR is open and not merged.
+Stopping after the \`done\` line without this bounded pause leaves the lane reading terminal and eligible for automatic reaping. You are finished.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 EOF
       ;;

@@ -456,10 +456,12 @@ The report is the only thing that survives, so anything worth keeping must be in
    https:// URL exactly as the forge printed it, never a bare number such as "PR 108"; firstmate
    copies that URL from your line rather than assembling one.
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - ONLY when you are deliberately idling on a
-   known external wait you expect to clear on its own ($CREWMATE_PAUSE_WAIT_EXAMPLES):
-   firstmate then leaves your idle pane alone and rechecks it on a long cadence instead of
-   treating it as a possible wedge. When you know when the wait clears, say so in the line with
-   \`until <YYYY-MM-DDTHH:MMZ>\` (UTC) and firstmate rechecks at that time instead.
+   known external wait you expect to clear on its own ($CREWMATE_PAUSE_WAIT_EXAMPLES); awaiting
+   the captain's merge decision for an open PR is such a wait and requires a bounded pause after
+   the terminal \`done: PR ...\` line. Keep that closing order: append \`done\` first and the
+   bounded \`$PAUSED_VERB\` line last, because a state read uses the newest line.
+   When you know when the wait clears, include \`until <YYYY-MM-DDTHH:MMZ>\` (UTC) in that
+   pause line; without an \`until\` timestamp the pause does not stop the alarm.
    Use \`blocked:\` when you are stuck and need help.
 5. If you hit the same obstacle twice, append \`blocked [at=<epoch>]: {why}\` and stop; firstmate will help.
 6. If a decision belongs to a human (product choices, destructive actions),
@@ -546,6 +548,7 @@ $RULE1
    firstmate copies that URL from your line rather than assembling one.
    A mid-task \`working:\` line (including setup complete) is nonterminal: do not end the
    Use \`$PAUSED_VERB: {why}\`; next: {firstmate recheck or worker action}; until <YYYY-MM-DDTHH:MMZ> only for a known external wait expected to clear on its own ($CREWMATE_PAUSE_WAIT_EXAMPLES).
+   A merge decision awaiting the captain is such a wait: after the terminal \`done: PR ...\` line, append the bounded pause LAST, because state reads use the newest line; without \`until\`, the pause does not stop the alarm.
    Use \`blocked [key=<work-slug>]: {evidence}; next: {one concrete next action}\` when firstmate must act.
    Use \`needs-decision [key=<work-slug>]: {question and options}; next: {captain choice or firstmate action}\` when a decision belongs above the worker.
    Backward-compatible lines without \`next:\` remain valid, but never omit the concrete next action on new blocker or decision reports.
