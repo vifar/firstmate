@@ -1,0 +1,25 @@
+# Focused regression tests for the awk numeric-coercion fix (target commit)
+# helper under test: bin/fm-crew-state.sh sourcing bin/fm-nm-run-lib.sh
+
+## New tests (each must exit 0; assertions fail the script otherwise)
+all four new regression tests exited 0
+
+## Existing truncation/malformed controls (must still report unknown)
+ok - missing complete-inventory failure reports unknown
+ok - corrupt complete-inventory failure reports unknown
+ok - schema complete-inventory failure reports unknown
+ok - repo complete-inventory failure reports unknown
+ok - count complete-inventory failure reports unknown
+ok - R6 structural completeness and requested-run validation remain enforced
+ok - capped overview retains both competing same-branch run ids
+
+## Full targeted suite: tests/fm-crew-state.test.sh
+# (full output run this turn; summary below)
+ok lines:    100
+not-ok lines: 1
+# The single not-ok is test_executing_run_binds_without_pipeline_owned_sync,
+# reproduced identically with the base 0e5e8ca bin/fm-nm-run-lib.sh (pre-existing,
+# caused by fork-sync 699362a dropping fm_nm_run_is_executing usage; unrelated to this change).
+not ok - an executing run binds without the pipeline_owned label (missing: 'source: run-step')
+--- output ---
+state: working · source: status-log · implementing

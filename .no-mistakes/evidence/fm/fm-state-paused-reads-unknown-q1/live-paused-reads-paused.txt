@@ -1,0 +1,51 @@
+# Live end-to-end validation: false-inactivity 'paused' fix
+# date: 2026-09-24T18:40:51Z
+# worktree (target commit): /Users/king/.no-mistakes/worktrees/8457bd67d0a5/01M3AAXFK6REGTZ9GTJG9RSV7S
+# target commit: 5e1f75635d4808d1cdb2f253148a9946dc11f480
+# no-mistakes: no-mistakes version v1.77.0-24-gfa81e9a (fa81e9a) 2026-09-21T18:23:13Z
+# isolated NM_HOME: /var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-live-probe.22rmPL/nm   isolated tmux TMUX_TMPDIR: /var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-live-probe.22rmPL/tmux
+
+## Real no-mistakes CLI overview (seeded real SQLite, 78 runs on other branches)
+$ (cd $LAB/repo && NM_HOME=$LAB/nm no-mistakes axi)
+count: 10 of 78 total
+runs[10]{id,branch,status,head,pr}:
+  "01OTHER00000077",fm/other-77,running,dc66a20f,""
+  "01OTHER00000076",fm/other-76,running,dc66a20f,""
+  "01OTHER00000075",fm/other-75,running,dc66a20f,""
+  "01OTHER00000074",fm/other-74,running,dc66a20f,""
+  "01OTHER00000073",fm/other-73,running,dc66a20f,""
+  "01OTHER00000072",fm/other-72,running,dc66a20f,""
+  "01OTHER00000071",fm/other-71,running,dc66a20f,""
+  "01OTHER00000070",fm/other-70,running,dc66a20f,""
+  "01OTHER00000069",fm/other-69,running,dc66a20f,""
+  "01OTHER00000068",fm/other-68,running,dc66a20f,""
+
+## Real no-mistakes axi status (current branch has no run)
+current_branch: fm/paused-lane
+runs_on_current_branch: 0
+count: 10 of 78 total
+runs[10]{id,branch,status,head,pr}:
+
+## Task: branch=fm/paused-lane (no run), idle isolated tmux pane, newest status line:
+   paused [at=1790215262]: awaiting the captain's merge decision; next: firstmate rechecks the PR; until 2026-09-24T04:00Z
+
+## FIXED (target commit) fm-crew-state output:
+$ bin/fm-crew-state.sh paused
+state: paused · source: status-log · awaiting the captain's merge decision; next: firstmate rechecks the PR; until 2026-09-24T04:00Z
+
+## PRE-FIX (base 0e5e8ca bin/fm-nm-run-lib.sh) fm-crew-state output:
+$ bin/fm-crew-state.sh paused
+state: unknown · source: run-step · unreadable runs table; run ids: 
+# restored bin/fm-nm-run-lib.sh hash: 98209b5b2cd9ff4a921e4c3686aea146f1e89371 (HEAD: 98209b5b2cd9ff4a921e4c3686aea146f1e89371)
+
+## Adversarial controls (same live no-run/capped/tmux setup)
+# newest line 'working: implementing':
+state: working · source: status-log · implementing
+# newest line 'blocked: waiting on human':
+state: blocked · source: status-log · waiting on human
+# no status file at all:
+state: unknown · source: none · no current-state source available
+
+## Downstream watcher absorb predicate (bin/fm-classify-lib.sh over the live read)
+# paused task -> absorb_class=paused; crew_is_paused=yes
+# stuck task  -> absorb_class=none; crew_is_paused=no
