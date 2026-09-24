@@ -1391,7 +1391,7 @@ SH
   out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_OMP_HANDOFF_TTL_MS=1000 FM_OMP_UNCONSUMED_CLOSE_TTL_MS=100 \
     EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const state = `${process.env.FM_HOME}/state`;
 const handoff = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
 mkdirSync(`${state}/extensions/omp-primary-watch`, { recursive: true });
@@ -1418,14 +1418,26 @@ const waitUntil = async (predicate, label) => {
   }
 };
 await waitUntil(() => sent.some((wake) => wake.m.includes("unconsumed-q1")), "the accepted close");
-await waitUntil(() => {
-  try { return JSON.parse(readFileSync(handoff, "utf8")).pending.length === 0; }
-  catch { return false; }
-}, "the expired close to leave the handoff store");
+const acceptedAt = Date.now();
+// Let the unconsumed-close expiry window actually elapse so the scheduled
+// cleanup retires the delivered record. The wait is deadline-bounded and fails
+// loudly, so a cleanup that never runs is a test failure rather than a hang.
+await waitUntil(() => Date.now() - acceptedAt >= 600, "the unconsumed close expiry window to elapse");
 if (sent.filter((wake) => wake.m.includes("unconsumed-q1")).length !== 1) {
   throw new Error(`the accepted close must not be re-delivered: ${JSON.stringify(sent.map((wake) => wake.m))}`);
 }
+// Retirement is observed at the shutdown boundary, because the store file is
+// written ONLY by persistReplacementHandoff, whose sole call sites are in
+// stopSessionGeneration - so during the run the file does not exist at all and
+// an "empty store" is never produced. A retired record leaves nothing to
+// persist, so the store is ABSENT here; a record that was never retired is
+// written back, so this fails. Absence, not pending.length === 0, is the
+// observable - do not "fix" this back to an empty-array check.
 await handlers.get("session_shutdown")({}, {});
+if (existsSync(handoff)) {
+  const store = JSON.parse(readFileSync(handoff, "utf8"));
+  throw new Error(`a retired unconsumed close must not be persisted, saw ${store.pending.length} record(s): ${JSON.stringify(store.pending.map((item) => item.message))}`);
+}
 process.exit(0);
 EOF
 )
