@@ -3326,6 +3326,130 @@ test_capped_competing_live_runs_report_both_ids() {
   pass 'capped overview retains both competing same-branch run ids'
 }
 
+# The 2026-09-24 false-inactivity incident: a task whose own branch has NO run
+# among the bounded AXI overview, while that overview is TRUNCATED (its own
+# `count: <shown> of <total> total` reports more runs than it lists) because the
+# fleet has many concurrent runs. That combination is what sends selection to
+# the optional state-database reader for a complete same-branch inventory; the
+# reader then finds zero rows for this branch and re-parses a rebuilt
+# `count: 0 of 0 total` table, where awk's uninitialized `seen` compared as a
+# STRING against the parsed "0" and produced `unknown|unreadable runs table`.
+# A non-truncated overview never reaches that code at all, so the fixture must
+# keep `total` above `shown` or the case silently stops testing the defect.
+make_capped_no_own_run_case() {  # <name> [<other-branch-rows>]
+  local d=$TMP_ROOT/$1 others=${2:-10} total=${3:-596}
+  reset_fakes
+  mkdir -p "$d/state"
+  make_repo_on_branch "$d/wt" fm/paused-lane
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/paused.meta" "window=fm:fm-paused" "worktree=$d/wt" "kind=ship" "harness=claude"
+  NM_HOME="$d/nm"
+  mkdir -p "$NM_HOME"
+  FM_FAKE_AXI_HOME=$(python3 - "$NM_HOME/state.sqlite" "$d/wt" "$FM_FAKE_RUN_HEAD" "$others" "$total" <<'PY'
+import csv
+import json
+import sqlite3
+import sys
+
+database, worktree, head, others, total = sys.argv[1:]
+others = int(others)
+total = int(total)
+with sqlite3.connect(database) as db:
+    db.executescript("""
+        CREATE TABLE repos (id TEXT PRIMARY KEY, working_path TEXT NOT NULL UNIQUE);
+        CREATE TABLE runs (id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, branch TEXT NOT NULL,
+                           status TEXT NOT NULL, head_sha TEXT NOT NULL, created_at INTEGER NOT NULL);
+    """)
+    db.execute("INSERT INTO repos VALUES (?, ?)", ("repo", worktree))
+    # The stored fleet is larger than the shown window (total > others), which
+    # is what makes the CLI's own overview report truncation.
+    db.executemany("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+                   [("01OTHER%02d" % i, "repo", "fm/other-%d" % i, "running", head, i)
+                    for i in range(total)])
+    print("repo: " + json.dumps(worktree))
+    print("count: %d of %d total" % (others, total))
+    print("runs[%d]{id,branch,status,head,pr}:" % others)
+    for i in range(others):
+        sys.stdout.write("  ")
+        csv.writer(sys.stdout, lineterminator="\n").writerow(
+            ["01OTHER%02d" % i, "fm/other-%d" % i, "running", head, ""])
+PY
+  ) || fail 'could not create the no-own-run inventory fixture'
+  # A bare `axi status` answer for ANOTHER branch is what makes fm-crew-state
+  # reach the capped-overview selection at all (an empty answer skips the run
+  # lookup entirely), so the overview above is the input actually under test.
+  FM_FAKE_AXI_STATUS="$(run_running fm/other-0)"
+  FM_FAKE_AXI_STATUS_RUN=""
+  # No run anywhere else either: the plain runs-ledger fallback must stay empty
+  # so the verdict comes from this branch's absence, not a stray other row.
+  FM_FAKE_RUNS_LIST=""
+}
+
+# A genuinely parked merge-decision task must read `paused`, never the false
+# `unknown` that raised an inactivity notification. This is the direct
+# regression for the incident's own status line.
+test_capped_no_own_run_paused_reads_paused() {
+  make_capped_no_own_run_case capped-no-own-run-paused 0
+  local d=$TMP_ROOT/capped-no-own-run-paused out
+  printf 'paused [at=1790215262]: awaiting the captain'"'"'s merge decision; next: firstmate rechecks the PR; until 2026-09-24T04:00Z\n' \
+    > "$d/state/paused.status"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" paused
+  out=$(run_crew_state "$d" paused)
+  assert_not_contains "$out" 'unreadable runs table' 'a branch with no run of its own is not an unreadable table'
+  assert_contains "$out" 'state: paused' 'a parked merge-decision task reads paused, not unknown'
+  assert_contains "$out" 'source: status-log' 'the paused verdict comes from the task declaration'
+  assert_contains "$out" "awaiting the captain's merge decision" 'the pause reason is carried into the detail'
+}
+
+# Same zero-same-branch-row shape, but the overview itself is FULL of other
+# branches' runs, so the awk pass sees rows (and must still not count them).
+test_capped_only_foreign_rows_paused_reads_paused() {
+  make_capped_no_own_run_case capped-foreign-rows-paused 10
+  local d=$TMP_ROOT/capped-foreign-rows-paused out
+  printf 'paused [at=1790215262]: awaiting the captain'"'"'s merge decision; next: firstmate rechecks the PR; until 2026-09-24T04:00Z\n' \
+    > "$d/state/paused.status"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" paused
+  out=$(run_crew_state "$d" paused)
+  assert_not_contains "$out" 'unreadable runs table' 'other branches rows are not this branch inventory failure'
+  assert_contains "$out" 'state: paused' 'a fully foreign overview still reads the task pause'
+}
+
+# The other direction: no valid pause on record, no run, no busy pane. The
+# absent verdict must NOT be mistaken for a healthy pause - a genuinely
+# unaccounted-for task still surfaces as unknown so it can be acted on.
+test_capped_no_own_run_without_pause_still_unknown() {
+  make_capped_no_own_run_case capped-no-own-run-stuck 0
+  local d=$TMP_ROOT/capped-no-own-run-stuck out
+  printf 'working: implementing\n' > "$d/state/paused.status"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" paused
+  out=$(run_crew_state "$d" paused)
+  assert_not_contains "$out" 'unreadable runs table' 'the absent branch is not an unreadable table'
+  assert_not_contains "$out" 'state: paused' 'nothing declared a pause here'
+  assert_contains "$out" 'state: working' 'a working declaration still reads working'
+}
+
+# An expired `until` is not a licence to read the task as healthy: the pause
+# verb is still the declared state, but the point of this control is that the
+# absence fix did not start silencing a task whose wait has run out. The
+# bounded-pause freshness rule (an expired declaration keeps the unchanged
+# alarm schedule) is owned by the watcher; here we pin that the reader itself
+# never turns a no-run task into anything but the verb it actually declared.
+test_capped_no_own_run_expired_pause_still_reports_pause_verb() {
+  make_capped_no_own_run_case capped-no-own-run-expired 0
+  local d=$TMP_ROOT/capped-no-own-run-expired out
+  printf 'paused [at=1790215262]: awaiting the captain; next: recheck; until 2020-01-01T00:00Z\n' \
+    > "$d/state/paused.status"
+  FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" paused
+  out=$(run_crew_state "$d" paused)
+  assert_not_contains "$out" 'unreadable runs table' 'an expired-but-declared pause is still not a table failure'
+  assert_contains "$out" 'state: paused' 'the declared verb is reported'
+  assert_contains "$out" 'until 2020-01-01T00:00Z' 'the declared clearing time is preserved for the freshness check'
+}
+
 test_capped_overview_without_branch_rows_reports_both_ids() {
   make_capped_runs_case capped-absent running pending hidden
   local d=$TMP_ROOT/capped-absent out
@@ -3961,6 +4085,10 @@ test_runs_list_continuation_found_when_axi_answers_other_branch
 test_no_run_herdr_stale_registration_over_shell_reads_agent_gone
 test_no_run_herdr_stale_working_record_is_never_busy
 test_capped_competing_live_runs_report_both_ids
+test_capped_no_own_run_paused_reads_paused
+test_capped_only_foreign_rows_paused_reads_paused
+test_capped_no_own_run_without_pause_still_unknown
+test_capped_no_own_run_expired_pause_still_reports_pause_verb
 test_capped_overview_without_branch_rows_reports_both_ids
 test_capped_replacement_keeps_gate_and_inventory_unchanged
 test_capped_inventory_failures_report_unknown

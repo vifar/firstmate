@@ -204,10 +204,21 @@ fm_nm_select_run() {  # <branch> <axi-overview> <worktree>
     }
     inrows { inrows = 0 }
     END {
+      # The completeness counters are coerced with +0 because their operands do
+      # not share a type. A zero-row table (a branch with no run of its own)
+      # never enters the row loop, so `seen` keeps the awk uninitialized value,
+      # which compares as a STRING; `expected` is likewise a plain string (it is
+      # produced by sub() on the header line), so the raw `seen != expected` was
+      # a string compare of empty against "0" and read an empty same-branch
+      # inventory as an unreadable table. `shown`/`total` arrive from split() as
+      # numeric strings, which is why they alone compared correctly. Forcing
+      # every operand numeric makes the intent explicit and keeps the three
+      # counters comparing the same way; a malformed or genuinely truncated
+      # table still differs numerically and still reports unreadable/incomplete.
       if (!found) print "unavailable"
-      else if (bad || counts != 1 || seen != expected || seen != shown || total < shown)
+      else if (bad || counts != 1 || (seen+0) != (expected+0) || (seen+0) != (shown+0) || (total+0) < (shown+0))
         print "unknown|unreadable runs table; run ids: " ids
-      else if (shown < total) print "incomplete|" ids
+      else if ((shown+0) < (total+0)) print "incomplete|" ids
       else if (invalid_run) print "unknown|unreadable runs table; run ids: " ids
       else if (unknown_status) print "unknown|unrecognized run status; run ids: " ids
       else if (first == "") print "absent"
