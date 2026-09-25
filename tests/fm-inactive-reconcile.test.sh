@@ -773,11 +773,12 @@ test_scan_marker_replaces_symlink_safely() {
 
 test_nonterminal_obligations_surface_without_noise() {
   local state key first
-  for state in blocked parked unknown; do
+  for state in blocked parked paused unknown; do
     make_world "obligation-$state"
     case "$state" in
       blocked) write_child "$MAIN" child 'blocked: release credential missing' ;;
       parked) write_child "$MAIN" child 'needs-decision: choose release channel' ;;
+      paused) write_child "$MAIN" child 'paused: awaiting the upstream release cut; next: rerun the matrix' ;;
       unknown) write_child "$MAIN" child 'working: last known progress' ;;
     esac
     FM_FAKE_CREW_STATE="$state" run_reconcile "$MAIN" --startup
@@ -791,6 +792,7 @@ test_nonterminal_obligations_surface_without_noise() {
     case "$state:$first" in
       blocked:*'reason=release credential missing'*) ;;
       parked:*'reason=choose release channel'*) ;;
+      paused:*'reason=awaiting the upstream release cut; next: rerun the matrix'*) ;;
       unknown:*'reason=last known progress'*) ;;
       *) fail "$state obligation did not preserve its exact reason: $first" ;;
     esac
@@ -807,22 +809,80 @@ test_nonterminal_obligations_surface_without_noise() {
     FM_FAKE_CREW_STATE="$state" run_reconcile "$MAIN" --startup
     [ "$(wake_count "$MAIN" "$key")" = 1 ] || fail "$state did not re-surface after a resolved episode recurred"
   done
-  pass "blocked, parked, and unknown inactive workers surface exact obligations once per episode"
+  pass "blocked, parked, paused, and unknown inactive workers surface exact obligations once per episode"
 }
 
-test_working_paused_and_captain_held_states_do_not_report() {
-  local state
-  for state in working paused; do
-    make_world "nonterminal-$state"; write_child "$MAIN" child 'working: still active'
-    FM_FAKE_CREW_STATE="$state" run_reconcile "$MAIN" --startup
-    [ ! -s "$MAIN/state/.wake-queue" ] || fail "$state produced an inactive obligation"
-    [ "$(outcome_count "$MAIN" pending)" = 0 ] || fail "$state produced a terminal outcome"
-  done
+# Working and captain-held remain outside the obligation path. `paused` is
+# deliberately NO LONGER in this list: a declared pause used to fall through the
+# state dispatch's catch-all, which is precisely how a parked worker with plenty
+# of available work stayed invisible for hours. It now surfaces like blocked and
+# parked, and test_nonterminal_obligations_surface_without_noise owns that.
+test_working_and_captain_held_states_do_not_report() {
+  make_world nonterminal-working; write_child "$MAIN" child 'working: still active'
+  FM_FAKE_CREW_STATE='working' run_reconcile "$MAIN" --startup
+  [ ! -s "$MAIN/state/.wake-queue" ] || fail "working produced an inactive obligation"
+  [ "$(outcome_count "$MAIN" pending)" = 0 ] || fail "working produced a terminal outcome"
   make_world captain-held; write_child "$MAIN" child 'captain-held: awaiting captain'
   FM_FAKE_CREW_STATE='done' run_reconcile "$MAIN" --startup
   [ ! -s "$MAIN/state/.wake-queue" ] || fail "captain-held item produced an inactive obligation"
   [ "$(outcome_count "$MAIN" pending)" = 0 ] || fail "captain-held item was reconciled"
-  pass "working, paused, and captain-held workers retain their existing supervision paths"
+  pass "working and captain-held workers retain their existing supervision paths"
+}
+
+# The regression this exists for: a worker parked on a genuine external blocker
+# sat idle for hours while the supervisor kept confirming the blocker was real.
+# A declared pause is not proof that no work is available, so the obligation a
+# paused task raises must not be dischargeable by re-validating the declared
+# wait alone - it has to name the second question. This is the positive half;
+# the loop in test_nonterminal_obligations_surface_without_noise is the
+# anti-flood half, and together they are the whole property: surfaced once per
+# changed obligation, quiet on an unchanged one.
+test_paused_inactive_worker_surfaces_available_work_obligation() {
+  local obligation
+  make_world paused-available-work
+  write_child "$MAIN" child 'paused: awaiting the upstream release cut; next: rerun the matrix'
+  FM_FAKE_CREW_STATE='paused' run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" 'inactive-worker:')" = 1 ] \
+    || fail "a paused inactive worker raised no obligation at all"
+  obligation=$(cat "$MAIN/state/.wake-queue")
+  case "$obligation" in
+    *'state=paused'*) ;;
+    *) fail "the paused obligation did not name its state: $obligation" ;;
+  esac
+  case "$obligation" in
+    *'confirm the wait still holds'*) ;;
+    *) fail "the paused obligation dropped the declared-wait half: $obligation" ;;
+  esac
+  case "$obligation" in
+    *'what the worker can do while it waits'*) ;;
+    *) fail "the paused obligation can be discharged by re-validating the blocker alone: $obligation" ;;
+  esac
+  pass "a paused inactive worker raises one obligation that demands the available-work check"
+}
+
+# A paused worker that is genuinely idle behind an unchanged wait must stay
+# quiet: the obligation is per distinct pause, not per poll. A changed reason
+# re-surfaces, which is what keeps the anti-flood bound from silencing a real
+# new obligation.
+test_paused_obligation_does_not_flood_on_an_unchanged_wait() {
+  local key
+  make_world paused-no-flood
+  write_child "$MAIN" child 'paused: awaiting the upstream release cut; next: rerun the matrix'
+  key="inactive-worker:child:"
+  FM_FAKE_CREW_STATE='paused' run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" "$key")" = 1 ] || fail "the first paused poll did not surface its obligation"
+  FM_FAKE_CREW_STATE='paused' run_reconcile "$MAIN" --startup
+  FM_FAKE_CREW_STATE='paused' run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" "$key")" = 1 ] \
+    || fail "an unchanged paused obligation re-notified on every poll"
+  [ -s "$MAIN/state/.inactive-obligation-child" ] \
+    || fail "the paused obligation marker was not retained for an unchanged wait"
+  printf 'paused: the upstream release cut slipped a week; next: rerun the matrix\n' > "$MAIN/state/child.status"
+  age "$MAIN/state/child.status"
+  FM_FAKE_CREW_STATE='paused' run_reconcile "$MAIN" --startup
+  [ "$(wake_count "$MAIN" "$key")" = 2 ] \
+    || fail "a changed pause reason did not surface a new obligation"
+  pass "an unchanged paused obligation stays quiet while a changed reason re-surfaces"
 }
 
 # The actual watcher poll invokes the helper, while an idle secondmate remains
@@ -1167,7 +1227,9 @@ test_relaunch_cannot_replace_metadata_during_state_snapshot
 test_heartbeat_cap_does_not_delay_reconciliation
 test_scan_marker_replaces_symlink_safely
 test_nonterminal_obligations_surface_without_noise
-test_working_paused_and_captain_held_states_do_not_report
+test_paused_inactive_worker_surfaces_available_work_obligation
+test_paused_obligation_does_not_flood_on_an_unchanged_wait
+test_working_and_captain_held_states_do_not_report
 test_watcher_hook_and_idle_secondmate_exemption
 test_watcher_poll_delivers_child_ledger_line_to_parent
 test_stalled_state_read_is_bounded_and_scan_progresses
