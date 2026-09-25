@@ -62,10 +62,13 @@
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
 #   axes chosen by firstmate at intake. They are only threaded into harnesses whose
-#   installed CLIs were verified to support that axis; unsupported axes are omitted
-#   from that harness's launch rather than guessed. Ultra is the explicit
-#   exception: bin/fm-harness.sh validate-native-effort owns its model scope;
-#   supported Pi launches receive --codex-effort ultra, never --thinking ultra.
+#   installed CLIs were verified to support that axis; an unsupported axis is omitted
+#   from that harness's launch rather than guessed, and an effort the selected model's
+#   own advertised thinking ladder does not carry is warned about, omitted, and
+#   recorded as effort_applied= beside effort= (bin/fm-harness.sh effort-verdict owns
+#   that lookup). Ultra is the explicit exception: bin/fm-harness.sh
+#   validate-native-effort owns its model scope; supported Pi launches receive
+#   --codex-effort ultra, never --thinking ultra.
 #   --backend <name> is the explicit runtime session-provider backend for this
 #   exact task only (docs/configuration.md "Runtime backend" owns when that flag
 #   is authorized). Without it, the script resolves FM_BACKEND, then
