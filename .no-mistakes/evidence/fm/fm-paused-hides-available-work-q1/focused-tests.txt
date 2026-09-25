@@ -1,0 +1,24 @@
+# Focused automated coverage for the parked-paused available-work change
+
+## tests/fm-inactive-reconcile.test.sh (whole suite; real reconcile script driven as a subprocess)
+  ok - blocked, parked, paused, and unknown inactive workers surface exact obligations once per episode
+  ok - a paused inactive worker raises one obligation that demands the available-work check
+  ok - an unchanged paused obligation stays quiet while a changed reason re-surfaces
+  ok - working and captain-held workers retain their existing supervision paths
+  [suite result] all inactive reconciliation tests passed
+
+## tests/fm-daemon.test.sh (whole suite; real daemon functions)
+  ok - housekeeping re-surfaces a stale declared pause on the long cadence and resets its window
+  [suite exit status] 0
+
+## tests/fm-watch-triage.test.sh (targeted via FM_TEST_ONLY; real fm-watch.sh subprocess)
+  [rc=0] ok - a declared wait is not wedge-escalated by a working verdict, while an elapsed declaration and an undeclared lane both keep the unchanged ladder
+  [rc=0] ok - a declared pause is absorbed on first sight, then re-surfaced as a recheck past the threshold, never wedge-escalated
+  [rc=0] ok - a parked live worker surfaces once, absorbs pane churn for the whole re-surface window, then re-surfaces when it elapses
+  [rc=0] ok - a live paused worker stays absorbed until its declared time, then rechecks
+  [rc=0] ok - a declared wait naming a near-future until time stays quiet until that time
+  [rc=0] ok - a wrong-year declared time cannot silence the watcher beyond the recheck cadence
+  [rc=0] ok - a declared wait whose until time has passed is rechecked at once, then held to the cadence
+  [rc=0] ok - a busy pane under a declared pause is rechecked on the long cadence, and lifting the pause restores the wedge escalation
+  [rc=0] ok - a declared pause is periodically rechecked against authoritative active-run state
+  [rc=0] ok - a declared paused secondmate re-surfaces on the bounded normal-mode cadence

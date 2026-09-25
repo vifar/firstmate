@@ -1,0 +1,42 @@
+==================== SCENARIO 1: paused inactive worker obligation (live) ====================
+$ bin/fm-crew-state.sh child  ->  state: paused · source: status-log · awaiting the upstream release cut; next: rerun the matrix
+$ bin/fm-inactive-reconcile.sh scan --startup (real crew-state, real tmux)
+actionable: inactive worker requires action: task=child state=paused reason=awaiting the upstream release cut; next: rerun the matrix; ask: confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work
+rc=0
+---- wake-queue ----
+1790308635	1	check	inactive-worker:child:3a69d3094662f736946df575a75d74e4	inactive worker requires action: task=child state=paused reason=awaiting the upstream release cut; next: rerun the matrix; ask: confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work
+---- obligation marker ----
+3a69d3094662f736946df575a75d74e4
+
+==================== SCENARIO 2: unchanged declaration does NOT flood (live) ====================
+wake count after 3 scans: 1
+
+==================== SCENARIO 3: changed declaration re-surfaces (live) ====================
+wake count after changed reason: 2
+last queued obligation:
+1790308637	2	check	inactive-worker:child:edb437d0b7e7ee2dab85884642589cc7	inactive worker requires action: task=child state=paused reason=the upstream release cut slipped a week; next: rerun the matrix; ask: confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work
+
+==================== SCENARIO 4: boundaries working / captain-held stay outside (live) ====================
+working crew-state: state: working · source: status-log · still active
+working: no wake (correct)
+captain-held: no wake (correct)
+
+==================== SCENARIO 5: pre-fix regression - paused produced NO obligation ====================
+$ base bin/fm-crew-state.sh -> state: paused · source: status-log · awaiting the upstream release cut; next: rerun the matrix
+$ base bin/fm-inactive-reconcile.sh scan --startup
+rc=0
+wake-queue EMPTY: paused produced no obligation before the fix (regression reproduced)
+
+==================== SCENARIO 6: watcher paused re-surface carries the available-work ask (live) ====================
+$ fm-watch.sh poll 1 (first sight of the stale pane)
+stale: fmlab:fm-child
+$ fm-watch.sh poll 2 (bounded recheck of the declared pause)
+stale: fmlab:fm-child (paused 2010s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work)
+---- wake-queue (stale rows) ----
+1790308648	1	stale	fmlab:fm-child	stale: fmlab:fm-child
+1790308652	2	stale	fmlab:fm-child	stale: fmlab:fm-child (paused 2010s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work)
+
+==================== SCENARIO 7: not mislabeled as a wedge (live) ====================
+no 'possible wedge' wording anywhere in the paused wake queue (correct)
+
+ALL LIVE SCENARIOS COMPLETE
