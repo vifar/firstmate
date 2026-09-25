@@ -22,6 +22,11 @@ For other values, if requested effort is outside the adapter's accepted set, the
 This preserves launch success instead of passing a known-bad value.
 A harness with no verified interactive effort flag follows the same record-and-omit contract.
 
+The accepted set is also narrowed by the MODEL's own advertised thinking ladder, because a harness-level set alone overstates what a given model can honour: a standing config that asks for `medium` on a model advertising only `low|high|max` passes a harness-level check, is recorded as `effort=medium`, and launches with no signal that the level could not run.
+`bin/fm-harness.sh effort-verdict` (and `effort-verdicts` for whole configs) is the single owner of that lookup, so no caller restates a ladder; `bin/fm-spawn.sh` asks it before emitting any effort flag and `bin/fm-dispatch-resolve.sh` and `bin/fm-bootstrap.sh` ask it when validating `config/crew-dispatch.json`.
+When the model's ladder omits a requested level the spawn reports it LOUDLY and omits the flag, and the task record keeps `effort=` (the request) beside `effort_applied=` (what actually shipped, empty when no flag was emitted) so the record can never silently overstate the request.
+An unreadable, undeclared, or unlisted ladder establishes nothing: it stays a notice and never refuses a launch, and a provider the listing does not know (extension-registered providers are never listed) passes through exactly as before.
+
 ## Harness and provider identity
 
 Harness identity is independent of model provider.

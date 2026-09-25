@@ -19,6 +19,44 @@
 #                                        codex-native/<id>. Other efforts retain
 #                                        their adapter's existing policy. Native
 #                                        Codex validates model support at startup.
+#        fm-harness.sh effort-verdict <harness> <model> [<effort>]
+#                                        Print "<verdict>\t<source>\t<ladder>\t<listing>".
+#                                        This is the single owner of the
+#                                        model-aware effort decision: the
+#                                        harness-level accepted set, narrowed by
+#                                        the model's OWN advertised thinking
+#                                        ladder whenever one is readable. An
+#                                        unreachable listing establishes nothing,
+#                                        so an unreadable ladder is never a
+#                                        refusal.
+#                                          verdict: supported | unsupported | -
+#                                          source:  native           the ultra
+#                                                   contract owns it
+#                                                   model-ladder     a readable
+#                                                   per-model ladder decided it
+#                                                   model-undeclared the model is
+#                                                   listed but advertises no ladder
+#                                                   model-unreadable the ladder
+#                                                   could not be read
+#                                                   model-unscoped   not a concrete
+#                                                   <provider>/<id> selection
+#                                                   harness-set      the harness has
+#                                                   no per-model ladder surface
+#                                                   harness-no-axis  no verified
+#                                                   interactive effort axis
+#                                          ladder:  comma levels, or -
+#                                          listing: omp listing status
+#                                                   (listed|listed-undeclared|
+#                                                   provider-unlisted|unlisted|
+#                                                   not-model|unreadable), or -
+#        fm-harness.sh effort-verdicts   Read "<harness>\t<model>\t<effort>" lines on
+#                                        stdin and print ONE nested JSON object,
+#                                        harness -> model -> effort ->
+#                                        supported|unsupported, so a jq config
+#                                        validator consults this owner instead of
+#                                        restating any effort table. Every
+#                                        requested triple gets an entry, and no
+#                                        ladder is read twice.
 #        fm-harness.sh ancestry [<pid>] print "<strength> <harness>" for the nearest
 #                                        harness process at or above <pid> (default this
 #                                        process), or nothing when the walk finds none.
@@ -66,6 +104,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "$SCRIPT_DIR/fm-gemini-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 # Print the harness named by a verified environment marker, or nothing when no
 # marker is present. Markers only report what the environment CLAIMS; detect_own
@@ -496,8 +536,232 @@ validate_native_effort() {
   return 1
 }
 
+# ---- model-aware effort ladder owner ------------------------------------------
+#
+# The single owner of the effort axis. The harness-level accepted sets, the
+# per-model ladder read, and the rule that combines them live here and nowhere
+# else: bin/fm-spawn.sh asks `effort-verdict` before it emits any effort flag,
+# and bin/fm-dispatch-resolve.sh and bin/fm-bootstrap.sh ask `effort-verdicts`
+# once per config instead of restating an effort table in jq.
+#
+# Why this exists: a requested effort used to be checked only against the
+# harness's accepted set. A standing config asking for `medium` on a model whose
+# advertised ladder is low,high,max therefore passed validation, was recorded as
+# `effort=medium`, and launched with no warning, so the recorded intent silently
+# overstated what the model could honour. The model's own advertised ladder now
+# decides, and a contradiction is reported rather than passed over.
+#
+# An unreachable surface establishes nothing (references/common/model-and-effort.md):
+# a ladder that cannot be read leaves the harness-level set in force, so an
+# unreadable listing never becomes a refusal.
+
+# The harness-level accepted set for <harness> as space-separated levels, or
+# non-zero when this owner declares no axis for it (the caller then inherits the
+# permissive shared vocabulary, exactly as the previous per-harness verdicts
+# did). `ultra` appears in no set: the native contract above contributes it, so
+# no set restates that rule. An empty set is a harness with no verified
+# interactive effort axis, which accepts nothing.
+harness_effort_set() {  # <harness>
+  case "${1:-}" in
+    claude | omp | muse | pi | pi-signed) printf '%s\n' 'low medium high xhigh max' ;;
+    codex) printf '%s\n' 'low medium high xhigh' ;;
+    grok | agy) printf '%s\n' 'low medium high' ;;
+    rovo) printf '%s\n' 'low medium high max' ;;
+    opencode | kimi | cursor) printf '%s\n' '' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Print the extra levels <harness> declares for one <model> in its own adapter
+# contract, space separated. These are declared facts, not catalog copies: they
+# stay in force whether or not a ladder could be read, because a declared
+# capability is what the verified adapter reference established.
+harness_model_levels() {  # <harness> <model>
+  case "${1:-}" in
+    codex)
+      # references/harness/codex.md: the installed catalog advertises max for
+      # gpt-5.6-luna, and firstmate passes it for that model.
+      case "${2:-}" in gpt-5.6-luna) printf '%s\n' 'max' ;; esac
+      ;;
+  esac
+  return 0
+}
+
+levels_contains() {  # <levels> <level>
+  local lvl
+  for lvl in $1; do
+    [ "$lvl" = "$2" ] && return 0
+  done
+  return 1
+}
+
+levels_union() {  # <levels> <levels>
+  local out=$1 lvl
+  for lvl in $2; do
+    levels_contains "$out" "$lvl" || out="$out $lvl"
+  done
+  printf '%s\n' "${out# }"
+}
+
+levels_intersect() {  # <levels> <levels>
+  local out='' lvl
+  for lvl in $1; do
+    levels_contains "$2" "$lvl" && out="$out $lvl"
+  done
+  printf '%s\n' "${out# }"
+}
+
+levels_json() {  # <levels> -> a JSON array on one line
+  local out='[]' lvl
+  for lvl in $1; do
+    out=$(printf '%s' "$out" | jq -c --arg l "$lvl" '. + [$l]' 2>/dev/null) || out='[]'
+  done
+  printf '%s\n' "$out"
+}
+
+# Print `omp models --json` verbatim, or nothing when it cannot be read. Cached
+# for the life of the process, so answering many pairs costs one probe. A stalled
+# vendor CLI must never block a spawn or a session start, so the probe runs under
+# the shared hard bound, and any failure is reported as unreadable.
+#
+# FM_OMP_BIN lets a caller that already resolved the executable (bin/fm-spawn.sh)
+# pin the exact binary this owner probes, so the catalog read stays one code path
+# rather than one per resolved caller.
+OMP_MODELS_RAW_READ=0
+OMP_MODELS_RAW=
+omp_models_raw() {
+  [ "$OMP_MODELS_RAW_READ" = 1 ] && { printf '%s' "$OMP_MODELS_RAW"; return 0; }
+  OMP_MODELS_RAW_READ=1
+  local bin=${FM_OMP_BIN:-}
+  command -v jq >/dev/null 2>&1 || return 0
+  [ -n "$bin" ] || bin=$(command -v omp 2>/dev/null) || return 0
+  [ -n "$bin" ] || return 0
+  [ -x "$bin" ] || return 0
+  OMP_MODELS_RAW=$(OMP_SKIP_SETUP=1 fm_run_timed "${FM_OMP_MODELS_TIMEOUT:-10}" "$bin" models --json 2>/dev/null) || OMP_MODELS_RAW=
+  printf '%s' "$OMP_MODELS_RAW"
+}
+
+# Print "<listing-status>\t<advertised levels, comma separated or ->" for one omp
+# model selection. The ONLY reader of the omp catalog shape, scoped to exactly
+# what that listing can prove:
+#   listed             listed, with the thinking ladder in the second field
+#   listed-undeclared  listed, but advertising no thinking ladder at all
+#   provider-unlisted  the provider is absent from the listing
+#   unlisted           absent although its provider is listed
+#   not-model          not a concrete <provider>/<id> selection
+#   unreadable         the listing could not be read
+omp_model_ladder() {  # <model>
+  local model=${1:-} listing providers levels
+  [ -n "$model" ] && [ "$model" != default ] && [ "$model" != - ] || { printf 'not-model\t-\n'; return 0; }
+  case "$model" in */*) ;; *) printf 'not-model\t-\n'; return 0 ;; esac
+  listing=$(omp_models_raw)
+  [ -n "$listing" ] || { printf 'unreadable\t-\n'; return 0; }
+  providers=$(printf '%s' "$listing" | jq -r '.models[]?.provider // empty' 2>/dev/null | sort -u) || providers=
+  [ -n "$providers" ] || { printf 'unreadable\t-\n'; return 0; }
+  if ! printf '%s\n' "$providers" | grep -qxF -- "${model%%/*}"; then
+    printf 'provider-unlisted\t-\n'
+    return 0
+  fi
+  if printf '%s' "$listing" | jq -e --arg m "$model" '.models[]? | select(.selector == $m)' >/dev/null 2>&1; then
+    levels=$(printf '%s' "$listing" | jq -r --arg m "$model" \
+      '[.models[]? | select(.selector == $m) | (.thinking // [])[]] | join(",")' 2>/dev/null) || levels=
+    if [ -n "$levels" ]; then printf 'listed\t%s\n' "$levels"; else printf 'listed-undeclared\t-\n'; fi
+    return 0
+  fi
+  printf 'unlisted\t-\n'
+}
+
+# Print "<source>\t<ladder>\t<listing>\t<effective levels>" for <harness> <model>.
+# The single place the harness set, the readable per-model ladder, the declared
+# per-model levels, and the native ultra contract combine.
+#   source  no-opinion       no declared axis: the shared vocabulary applies
+#           harness-no-axis  the harness exposes no verified effort axis
+#           harness-set      the harness set decided, with no readable ladder
+#           model-ladder     the model's own advertised ladder narrowed it
+#           model-undeclared listed, but the model advertises no ladder
+#           model-unreadable the model's ladder could not be read
+#           model-unscoped   not a concrete <provider>/<id> selection
+#   ladder  the model's advertised levels as evidence, or -
+#   listing the omp model-listing status above, or -
+effort_levels_for() {  # <harness> <model>
+  local harness=${1:-} model=${2:-} set src ladder='-' listing='-' read_out
+  [ -n "$model" ] && [ "$model" != default ] || model=-
+  if set=$(harness_effort_set "$harness"); then
+    if [ -n "$set" ]; then src="harness-set"; else src="harness-no-axis"; fi
+  else
+    src="no-opinion"
+    set='low medium high xhigh max'
+  fi
+  # omp is the verified harness whose per-model ladder is readable from a CLI
+  # listing; every other adapter's effort axis is model-independent or unknown.
+  if [ "$harness" = omp ] && [ "$src" != harness-no-axis ]; then
+    read_out=$(omp_model_ladder "$model")
+    listing=${read_out%%$'\t'*}
+    ladder=${read_out#*$'\t'}
+    case "$listing" in
+      listed)
+        set=$(levels_intersect "$set" "$(printf '%s' "$ladder" | tr ',' ' ')")
+        src="model-ladder"
+        ;;
+      listed-undeclared) src="model-undeclared"; ladder='-' ;;
+      unreadable | provider-unlisted | unlisted) src="model-unreadable"; ladder='-' ;;
+      *) src="model-unscoped"; ladder='-' ;;
+    esac
+  fi
+  set=$(levels_union "$set" "$(harness_model_levels "$harness" "$model")")
+  if validate_native_effort "$harness" "$model" ultra 2>/dev/null; then
+    set=$(levels_union "$set" ultra)
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$src" "$ladder" "$listing" "$set"
+}
+
+# Print "<verdict>\t<source>\t<ladder>\t<listing>". The verdict answers the
+# launch question - may this level reach this model - and the rest carries the
+# evidence a caller reports. An empty <effort> reports the model and listing
+# verdicts with no effort verdict, which is what a caller with no requested level
+# wants to know.
+effort_verdict() {  # <harness> <model> [<effort>]
+  local harness=${1:-} model=${2:-} effort=${3:-} fields src ladder listing set verdict='-'
+  [ -n "$effort" ] && [ "$effort" != default ] || effort=
+  fields=$(effort_levels_for "$harness" "$model")
+  IFS=$'\t' read -r src ladder listing set <<<"$fields"
+  if [ -n "$effort" ]; then
+    if levels_contains "$set" "$effort"; then verdict=supported; else verdict=unsupported; fi
+    [ "$effort" = ultra ] && src=native
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$verdict" "$src" "$ladder" "$listing"
+}
+
+# Read "<harness>\t<model>\t<effort>" lines on stdin and print ONE nested JSON
+# object, harness -> model -> effort -> "supported" | "unsupported", so a jq
+# config validator consults this owner instead of restating any effort table.
+# The "*" harness key is the permissive shared vocabulary for a harness this
+# owner declares no axis for. Every requested triple gets an entry, and each
+# model's ladder is read once no matter how many levels are asked about.
+effort_verdicts() {
+  local harness model effort fields set verdict entry
+  entry='{"*":{"*":{"low":"supported","medium":"supported","high":"supported","xhigh":"supported","max":"supported"}}}'
+  while IFS=$'\t' read -r harness model effort || [ -n "$harness" ]; do
+    [ -n "$harness" ] || continue
+    [ -n "$model" ] || model=-
+    [ -n "$effort" ] || effort=-
+    fields=$(effort_levels_for "$harness" "$model")
+    set=${fields##*$'\t'}
+    if [ "$effort" = - ]; then verdict=supported
+    elif levels_contains "$set" "$effort"; then verdict=supported
+    else verdict=unsupported
+    fi
+    entry=$(printf '%s' "$entry" | jq -c --arg h "$harness" --arg m "$model" \
+      --arg e "$effort" --arg v "$verdict" \
+      '.[$h] = ((.[$h] // {}) | .[$m] = ((.[$m] // {}) + {($e): $v}))') || return 1
+  done
+  printf '%s\n' "$entry"
+}
+
 case "${1:-}" in
   validate-native-effort) shift; validate_native_effort "$@" ;;
+  effort-verdict) shift; effort_verdict "$@" ;;
+  effort-verdicts) effort_verdicts ;;
   ancestry)
     case "${2:-}" in
       ''|*[!0-9]*) [ -z "${2:-}" ] || { echo "error: ancestry takes a numeric pid" >&2; exit 2; } ;;

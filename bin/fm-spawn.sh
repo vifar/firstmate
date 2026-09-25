@@ -581,6 +581,10 @@ KIND_SET=0
 HARNESS_ARG=
 MODEL=
 EFFORT=
+# The level that actually shipped. Equal to EFFORT unless the model's own
+# advertised ladder does not carry the requested level (see the effort-ladder
+# gate below), in which case it stays empty and the launch omits the flag.
+EFFORT_APPLIED=
 BACKEND_ARG=
 MODE=
 YOLO=
@@ -815,6 +819,7 @@ spawn_remote_secondmate() {
   local id=$1 remote host root home harness positional model effort backend out rc meta tmp
   local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation
   local remote_traceparent remote_recorded_traceparent sm_primary_head sync_out sync_rc
+  local remote_ladder
   local -a launch_args
   id=${POS[0]:-}
   fm_task_id_creation_valid "$id" || {
@@ -906,6 +911,18 @@ spawn_remote_secondmate() {
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 1
+  fi
+  # The model's own advertised ladder bounds the effort here too: a remote
+  # secondmate pin must not record a level its model cannot honour without that
+  # being visible. bin/fm-harness.sh is the single reader; an unreadable ladder
+  # is a notice, never a refusal.
+  if [ "$effort" != - ] && [ "$effort" != ultra ] && [ "$effort" != default ]; then
+    remote_ladder=$("$SCRIPT_DIR/fm-harness.sh" effort-verdict "$harness" "$model" "$effort" 2>/dev/null) || remote_ladder=
+    if [ "$(printf '%s' "$remote_ladder" | cut -f1)" = unsupported ] &&
+      [ "$(printf '%s' "$remote_ladder" | cut -f2)" = model-ladder ]; then
+      echo "warning: configured secondmate effort '$effort' is not in model '$model' advertised thinking ladder ($(printf '%s' "$remote_ladder" | cut -f3)); launching '$model' without an effort flag" >&2
+      effort=-
+    fi
   fi
   meta="$STATE/$id.meta"
   if [ -e "$meta" ] || [ -L "$meta" ]; then
@@ -1786,32 +1803,32 @@ pi_supports_tui_mode() {
   printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
 }
 
-# omp pre-launch model validation. `omp models --json` (omp 18.1.11) prints
-# {"models":[{"provider","id","selector":"<provider>/<id>",...}]} for built-in and
-# auto-discovered providers only; it never lists a provider an extension
-# registers at runtime (claude-bridge is the verified example), so the check is
-# scoped exactly to what the listing can prove: a <provider>/<id> whose provider
-# IS listed must be listed too, a provider the listing does not know passes
-# through with a notice, a bare fuzzy pattern is omp's own matcher's job, and an
-# unreadable listing establishes nothing (harness-adapters model-and-effort.md).
-omp_model_validate() { # <omp-bin> <model>
-  local bin=$1 model=$2 provider listing providers
+# omp pre-launch model validation. The catalog itself is read by the single
+# owner, bin/fm-harness.sh effort-verdict, which reports what the listing can
+# prove ({"models":[{"provider","id","selector":"<provider>/<id>",...}]} covers
+# built-in and auto-discovered providers only; it never lists a provider an
+# extension registers at runtime, with claude-bridge the verified example). This
+# function only turns that verdict into the right launch decision, so a
+# <provider>/<id> whose provider IS listed must be listed too, a provider the
+# listing does not know passes through with a notice, a bare fuzzy pattern is
+# omp's own matcher's job, and an unreadable or not-a-model verdict establishes
+# nothing (harness-adapters model-and-effort.md) and passes.
+omp_model_validate() { # <model> <owner-listing-status>
+  local model=$1 listing=$2 provider
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$model" in */*) ;; *) return 0 ;; esac
-  command -v jq >/dev/null 2>&1 || return 0
-  listing=$(OMP_SKIP_SETUP=1 "$bin" models --json 2>/dev/null) || return 0
-  providers=$(printf '%s' "$listing" | jq -r '.models[]?.provider // empty' 2>/dev/null | sort -u) || return 0
-  [ -n "$providers" ] || return 0
   provider=${model%%/*}
-  if ! printf '%s\n' "$providers" | grep -qxF -- "$provider"; then
+  case "$listing" in
+  provider-unlisted)
     echo "notice: omp provider '$provider' is not in 'omp models --json' (extension-registered providers are never listed); launching '$model' unvalidated" >&2
     return 0
-  fi
-  if printf '%s' "$listing" | jq -e --arg m "$model" '.models[]? | select(.selector == $m)' >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "error: omp model '$model' is not listed by 'omp models --json' although provider '$provider' is; choose a listed <provider>/<id> or omit --model" >&2
-  return 1
+    ;;
+  unlisted)
+    echo "error: omp model '$model' is not listed by 'omp models --json' although provider '$provider' is; choose a listed <provider>/<id> or omit --model" >&2
+    return 1
+    ;;
+  esac
+  return 0
 }
 
 # agy pre-launch model validation. `agy models` (agy 1.2.0) prints one model per
@@ -2251,11 +2268,52 @@ if [ "$EFFORT" = ultra ]; then
     exit 1
   }
 fi
+# Model-aware omp listing and effort gate, on ONE read of the model's advertised
+# ladder. bin/fm-harness.sh effort-verdict is the only reader of the omp catalog
+# shape, so both decisions below consume its answer instead of restating any
+# listing or effort table. Reading it once keeps a spawn to a single bounded
+# vendor probe:
+#   listing  decides the pre-existing model check (refuse a model its listed
+#            provider omits; notice and pass through an unlisted provider or an
+#            unreadable listing)
+#   verdict  decides the effort gate (record-and-omit a level this model does not
+#            advertise, exactly as an unsupported harness-level value is handled)
+EFFORT_APPLIED=$EFFORT
+MODEL_VERDICT=-
+MODEL_SRC=-
+MODEL_LADDER=-
+MODEL_LISTING=-
 if [ "$HARNESS" = omp ]; then
-  omp_model_validate "$OMP_BIN" "$MODEL" || exit 1
+  FM_OMP_BIN=$OMP_BIN
+  export FM_OMP_BIN
+fi
+if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
+  MODEL_LADDER_OUT=$("$SCRIPT_DIR/fm-harness.sh" effort-verdict "$HARNESS" "$MODEL" "$EFFORT" 2>/dev/null) || MODEL_LADDER_OUT=
+  IFS=$'\t' read -r MODEL_VERDICT MODEL_SRC MODEL_LADDER MODEL_LISTING <<<"$MODEL_LADDER_OUT"
+fi
+if [ "$HARNESS" = omp ]; then
+  omp_model_validate "${MODEL:-}" "${MODEL_LISTING:--}" || exit 1
 fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+fi
+if [ -n "$EFFORT" ] && [ "$EFFORT" != default ] && [ "$EFFORT" != ultra ]; then
+  # Only a MODEL LADDER verdict that a specific model lacks the level is a new
+  # contradiction worth a warning. `harness-set` (not a concrete <provider>/<id>
+  # selection) and `harness-no-axis` (a harness with no verified effort flag,
+  # e.g. opencode/kimi/cursor) are the pre-existing record-and-omit contract:
+  # the launch already omits the flag silently there, and warning on every such
+  # spawn would be noise.
+  case "$MODEL_SRC" in
+  model-ladder)
+    case "${MODEL_VERDICT:--}" in
+    unsupported)
+      EFFORT_APPLIED=
+      echo "warning: requested effort '$EFFORT' is not in model '${MODEL:-default}'s advertised thinking ladder (${MODEL_LADDER:--}); launching '${MODEL:-default}' without an effort flag" >&2
+      ;;
+    esac
+    ;;
+  esac
 fi
 
 # Typed-dispatch receipt gate (G3/G5) and meta provenance (G4).
@@ -4606,7 +4664,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort effort_applied busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4624,6 +4682,14 @@ preserve_relaunch_meta() {
   echo "tasktmp=$TASK_TMP"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
+  # Written only when the model's advertised ladder refused the requested level,
+  # so its presence alone says "the record's effort= is a request this model
+  # could not honour, and this is what actually ran". An EMPTY value is
+  # meaningful here (the launch emitted no effort flag), so the comparison must
+  # not treat empty as unset: `${X-}` rather than `${X:-}`.
+  if [ "${EFFORT_APPLIED-}" != "${EFFORT-}" ]; then
+    echo "effort_applied=${EFFORT_APPLIED-}"
+  fi
   if [ "$RELAUNCH" -eq 0 ]; then
     [ -z "${DISPATCH_META_STATUS:-}" ] || echo "dispatch_status=$DISPATCH_META_STATUS"
     [ -z "${DISPATCH_META_RULE:-}" ] || echo "dispatch_rule=$DISPATCH_META_RULE"
@@ -4767,12 +4833,12 @@ sq_ompcfg=$(shell_quote "${OMP_WORKER_CFG:-$FM_ROOT/.omp/fm-worker-overlay.yml}"
 sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
-EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
+EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT_APPLIED" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$HARNESS" = rovo ]; then
-  ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {
+  ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT_APPLIED" "$DATA" "$STATE" "$ID") || {
     echo "error: could not resolve this task's home paths for rovo's allowedExternalPaths grant" >&2
     exit 1
   }
