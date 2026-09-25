@@ -1,0 +1,24 @@
+complete: sample-nonref-scout captain-call inventory reviewed (sample-nonref-scout)
+=== teardown stdout/stderr ===
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /Users/king/.no-mistakes/worktrees/af95b24e5115/01M3CSTMAMNT011QAV1TBM9N3C/.pi/extensions/fm-primary-turnend-guard.ts -e /Users/king/.no-mistakes/worktrees/af95b24e5115/01M3CSTMAMNT011QAV1TBM9N3C/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown sample-nonref-scout complete (window firstmate:fm-sample-nonref-scout, worktree /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-captain-repro-teardown.PWZNI6/nonref-default/projects/missing-sample-nonref-scout)
+Backlog: sample-nonref-scout just finished (). Update /private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-captain-repro-teardown.PWZNI6/nonref-default/data/backlog.md - move sample-nonref-scout to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+teardown_exit=0
+=== backlog.md after teardown ===
+## In flight
+- [ ] sample-nonref-scout - Investigate the sample body decode (repo: sample) (kind: scout) (since 2026-09-25) (hold: captain must choose) (hold-kind: captain)
+  Captain hold set: 2026-09-25T17:37:22Z
+## Queued
+
+## Done
+=== data_relative probe ===
+data
+=== backlog transition gate probe ===
+/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3CSTMAMNT011QAV1TBM9N3C/bin/fm-backlog-transition-lib.sh: line 287: fm_backlog_backend_manual: command not found
+applies=no rc=2 skip=[] err=[/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3CSTMAMNT011QAV1TBM9N3C/bin/fm-backlog-transition-lib.sh: line 298: fm_tasks_axi_backend: command not found]

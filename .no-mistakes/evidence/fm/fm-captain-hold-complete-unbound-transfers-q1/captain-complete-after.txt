@@ -1,0 +1,14 @@
+=== bin/fm-captain-hold.sh complete 'sample-settled-review' sample-settled-call ===
+exit=0
+stdout=[complete: sample-settled-review captain-call inventory reviewed (sample-settled-call)]
+stderr=[]
+=== persisted sample-settled-review.meta ===
+decisions_reviewed=1
+decision_keys=sample-settled-call
+=== status stream after complete ===
+needs-decision [key=route]: choose route north or route south
+resolved [key=route]: the captain chose route north
+done: report complete
+=== verify ===
+verified: sample-settled-review captain-call inventory
+verify_exit=0
