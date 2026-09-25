@@ -1,0 +1,66 @@
+# Live spawn drive: bin/fm-spawn.sh with the REAL omp catalog (terminal backend is a fixture that records+does not execute the launch)
+# real omp: omp/18.3.0
+### fixture catalog built from live 'omp models --json' (vibeproxy/deepseek-v4.1-flash thinking=low,high,max)
+===== mismatch: --harness omp --model vibeproxy/deepseek-v4.1-flash --effort medium =====
+exit=0
+--- spawn warnings (model/effort) ---
+warning: requested effort 'medium' is not in model 'vibeproxy/deepseek-v4.1-flash's advertised thinking ladder (low,high,max); launching 'vibeproxy/deepseek-v4.1-flash' without an effort flag
+--- recorded launch thinking flag ---
+export COMPACT_ADVISER_DISABLE=1; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/mismatch/fake/fakebin/omp' --config '/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/.omp/fm-worker-overlay.yml' --auto-approve --cwd '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/mismatch/wt' --model 'vibeproxy/deepseek-v4.1-flash' -e '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/mismatch/home/state/omp-ladder-bad-live-q1.omp-ext.ts' "$('/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/bin/fm-operational-input.sh' encode launch-brief < '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/mismatch/home/data/omp-ladder-bad-live-q1/launch-brief.md')"
+send-keys
+--- task meta effort lines ---
+effort=medium
+effort_applied=
+
+===== supported: --harness omp --model vibeproxy/deepseek-v4.1-flash --effort high =====
+exit=0
+--- spawn warnings (model/effort) ---
+(none)
+--- recorded launch thinking flag ---
+export COMPACT_ADVISER_DISABLE=1; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/supported/fake/fakebin/omp' --config '/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/.omp/fm-worker-overlay.yml' --auto-approve --cwd '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/supported/wt' --model 'vibeproxy/deepseek-v4.1-flash' --thinking 'high' -e '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/supported/home/state/omp-ladder-ok-live-q2.omp-ext.ts' "$('/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/bin/fm-operational-input.sh' encode launch-brief < '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/supported/home/data/omp-ladder-ok-live-q2/launch-brief.md')"
+send-keys
+--- task meta effort lines ---
+effort=high
+
+### unreadable ladder (owner sees an empty catalog): medium must still launch
+===== unreadable: --harness omp --model vibeproxy/deepseek-v4.1-flash --effort medium =====
+exit=0
+--- spawn warnings (model/effort) ---
+(none)
+--- recorded launch thinking flag ---
+export COMPACT_ADVISER_DISABLE=1; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unreadable/fake/fakebin/omp' --config '/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/.omp/fm-worker-overlay.yml' --auto-approve --cwd '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unreadable/wt' --model 'vibeproxy/deepseek-v4.1-flash' --thinking 'medium' -e '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unreadable/home/state/omp-ladder-unreadable-live-q3.omp-ext.ts' "$('/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/bin/fm-operational-input.sh' encode launch-brief < '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unreadable/home/data/omp-ladder-unreadable-live-q3/launch-brief.md')"
+send-keys
+--- task meta effort lines ---
+effort=medium
+
+### pre-existing omp model check preserved: provider listed but model not listed must refuse
+===== unlisted-model: --harness omp --model vibeproxy/does-not-exist --effort medium =====
+exit=1
+--- spawn warnings (model/effort) ---
+error: omp model 'vibeproxy/does-not-exist' is not listed by 'omp models --json' although provider 'vibeproxy' is; choose a listed <provider>/<id> or omit --model
+--- recorded launch thinking flag ---
+(no launch log)
+--- task meta effort lines ---
+(no meta)
+
+### pre-existing omp model check preserved: extension-registered provider not listed passes with a notice
+===== unlisted-provider: --harness omp --model claude-bridge/claude-opus-4-8 --effort medium =====
+exit=0
+--- spawn warnings (model/effort) ---
+notice: omp provider 'claude-bridge' is not in 'omp models --json' (extension-registered providers are never listed); launching 'claude-bridge/claude-opus-4-8' unvalidated
+--- recorded launch thinking flag ---
+export COMPACT_ADVISER_DISABLE=1; env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unlisted-provider/fake/fakebin/omp' --config '/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/.omp/fm-worker-overlay.yml' --auto-approve --cwd '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unlisted-provider/wt' --model 'claude-bridge/claude-opus-4-8' --thinking 'medium' -e '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unlisted-provider/home/state/omp-unlisted-provider-live-q5.omp-ext.ts' "$('/Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00/bin/fm-operational-input.sh' encode launch-brief < '/private/var/folders/n2/68hqmc6118z82khk34c6kb780000gn/T/fm-spawn-effort-live.L5kfPg/unlisted-provider/home/data/omp-unlisted-provider-live-q5/launch-brief.md')"
+send-keys
+--- task meta effort lines ---
+effort=medium
+
+### ultra native contract preserved: omp ultra must refuse (no launch, no meta)
+===== ultra: --harness omp --model vibeproxy/deepseek-v4.1-flash --effort ultra =====
+exit=1
+--- spawn warnings (model/effort) ---
+error: ultra effort requires pi or pi-signed with an explicit codex-native/<model> model
+--- recorded launch thinking flag ---
+(no launch log)
+--- task meta effort lines ---
+(no meta)
+

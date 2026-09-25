@@ -1,0 +1,14 @@
+# Live owner drive: harness-level accepted sets and codex model-declared levels (pre-existing tables)
+effort-verdict claude - medium                -> supported	harness-set	-	-
+effort-verdict codex gpt-5.6-luna max         -> supported	harness-set	-	-
+effort-verdict codex gpt-5.5 max              -> unsupported	harness-set	-	-
+effort-verdict codex gpt-5.5 xhigh            -> supported	harness-set	-	-
+effort-verdict grok - high                    -> supported	harness-set	-	-
+effort-verdict grok - xhigh                   -> unsupported	harness-set	-	-
+effort-verdict rovo - max                     -> supported	harness-set	-	-
+effort-verdict muse - xhigh                   -> supported	harness-set	-	-
+effort-verdict agy - high                     -> supported	harness-set	-	-
+effort-verdict agy - xhigh                    -> unsupported	harness-set	-	-
+effort-verdict opencode - high                -> unsupported	harness-no-axis	-	-
+effort-verdict kimi kimi-code/k3 high         -> unsupported	harness-no-axis	-	-
+effort-verdict cursor cursor-grok-4.5-high high -> unsupported	harness-no-axis	-	-

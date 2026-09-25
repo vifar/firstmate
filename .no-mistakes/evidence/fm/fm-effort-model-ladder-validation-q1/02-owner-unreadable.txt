@@ -1,0 +1,17 @@
+# Live owner drive: unreachable / undeclared / unlisted ladder never refuses
+# worktree: /Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00
+
+== listed-undeclared from the REAL catalog (vibeproxy/codex-auto-review has thinking:null) ==
+{"selector":"vibeproxy/codex-auto-review","thinking":null}
+effort-verdict omp vibeproxy/codex-auto-review medium -> supported	model-undeclared	-	listed-undeclared
+effort-verdict omp vibeproxy/codex-auto-review xhigh  -> supported	model-undeclared	-	listed-undeclared
+
+== unreadable ladder (FM_OMP_BIN points at an executable that emits nothing) ==
+FM_OMP_BIN=<BROKEN_OMP>/omp effort-verdict omp vibeproxy/deepseek-v4.1-flash medium -> supported	model-unreadable	-	unreadable
+
+== unlisted provider (extension-registered, never in the catalog) ==
+effort-verdict omp claude-bridge/claude-opus-4-8 medium -> supported	model-unreadable	-	provider-unlisted
+
+== not a concrete provider/id selection ==
+effort-verdict omp default medium -> supported	model-unscoped	-	not-model
+effort-verdict omp "" medium -> supported	model-unscoped	-	not-model

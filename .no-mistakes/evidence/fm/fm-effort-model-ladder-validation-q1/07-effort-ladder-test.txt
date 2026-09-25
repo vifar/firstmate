@@ -1,0 +1,18 @@
+# Targeted repo test: tests/fm-harness-effort-ladder.test.sh
+ok - owner: the model's advertised ladder narrows the harness accepted set
+ok - owner: an unreadable, undeclared, or unlisted ladder is never a refusal
+ok - owner: the ultra native contract is unchanged
+ok - config: a level the model does not advertise is refused, a supported one still resolves
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+ok - spawn: a model/effort mismatch is surfaced and omitted, never silently launched
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+ok - spawn: a supported model/effort pair launches unchanged
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+ok - spawn: an unreadable ladder proceeds with a notice and no downgrade
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+cannot determine default branch: try running 'git fetch' or ensure you are on a branch
+ok - spawn: the ultra native contract still refuses outside pi/pi-signed
+EXIT=0

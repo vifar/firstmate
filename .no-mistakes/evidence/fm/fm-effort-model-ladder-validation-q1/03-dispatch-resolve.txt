@@ -1,0 +1,20 @@
+# Live config-validator drive: bin/fm-dispatch-resolve.sh against the REAL omp catalog
+# worktree: /Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00
+
+== config effort=medium (model advertises low,high,max) ==
+exit=2
+error: malformed rules file: <LAB>/config/crew-dispatch.json - each use profile effort must be supported by its harness and model
+
+== config effort=high (model advertises low,high,max) ==
+exit=0
+dispatch-resolve: error (http 401 after 0 ms: {"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server. Please check your API key and try again."}})
+dispatch-resolve:
+  status: error
+  reason: http 401 after 0 ms: {"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server. Please check your API key and try again."}}
+
+== owner unreachable (FM_OMP_BIN broken, config effort=medium): must NOT refuse as malformed ==
+exit=0
+dispatch-resolve: error (http 401 after 0 ms: {"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server. Please check your API key and try again."}})
+dispatch-resolve:
+  status: error
+  reason: http 401 after 0 ms: {"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server. Please check your API key and try again."}}

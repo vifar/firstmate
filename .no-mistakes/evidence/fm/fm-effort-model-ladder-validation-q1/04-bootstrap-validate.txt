@@ -1,0 +1,19 @@
+# Live config-validator drive: bin/fm-bootstrap.sh crew_dispatch_validate
+# real omp omp/18.3.0 on PATH for the 'real' cases
+### Live bootstrap validation, real omp catalog present on PATH
+== mismatch-real (effort=medium, omp-on-path=real) ==
+CREW_DISPATCH: invalid config/crew-dispatch.json - invalid effort: omp:medium
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+
+== supported-real (effort=high, omp-on-path=real) ==
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (only 1 rule(s))
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+
+### omp absent from PATH: owner cannot answer; must NOT refuse as invalid effort
+== owner-unavailable (effort=medium, omp-on-path=none) ==
+CREW_DISPATCH: weak rules - typed resolve cannot discriminate (only 1 rule(s))
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+

@@ -1,0 +1,41 @@
+# Live owner drive: bin/fm-harness.sh effort-verdict against the REAL omp omp/18.3.0 catalog
+# worktree: /Users/king/.no-mistakes/worktrees/af95b24e5115/01M3BJ9JSR5X67Q3ZK4JC7HC00
+# isolated FM_HOME: /tmp/fm-effort-live-ySLFVu
+== real omp catalog (advertised thinking ladders) ==
+vibeproxy/codex-auto-review	thinking=
+vibeproxy/deepseek-v4.1-flash	thinking=low,high,max
+vibeproxy/glm-5.3	thinking=low,high,max
+vibeproxy/gpt-6-astra	thinking=low,medium,high,xhigh,max
+vibeproxy/gpt-6-luna	thinking=low,medium,high,xhigh,max
+vibeproxy/gpt-6-sol	thinking=low,medium,high,xhigh,max
+
+== owner verdicts (real omp catalog) ==
+effort-verdict omp vibeproxy/deepseek-v4.1-flash medium                -> unsupported	model-ladder	low,high,max	listed
+effort-verdict omp vibeproxy/deepseek-v4.1-flash low                   -> supported	model-ladder	low,high,max	listed
+effort-verdict omp vibeproxy/deepseek-v4.1-flash high                  -> supported	model-ladder	low,high,max	listed
+effort-verdict omp vibeproxy/deepseek-v4.1-flash xhigh                 -> unsupported	model-ladder	low,high,max	listed
+effort-verdict omp vibeproxy/deepseek-v4.1-flash max                   -> supported	model-ladder	low,high,max	listed
+effort-verdict omp vibeproxy/gpt-6-luna medium                         -> supported	model-ladder	low,medium,high,xhigh,max	listed
+effort-verdict omp vibeproxy/gpt-6-luna xhigh                          -> supported	model-ladder	low,medium,high,xhigh,max	listed
+effort-verdict omp claude-bridge/claude-opus-4-8 medium                -> supported	model-unreadable	-	provider-unlisted
+effort-verdict omp vibeproxy/deepseek-v4.1-flash ultra                 -> unsupported	native	low,high,max	listed
+effort-verdict pi codex-native/gpt-5.6-luna ultra                      -> supported	native	-	-
+effort-verdict pi openai-codex/gpt-6-astra ultra                       -> unsupported	native	-	-
+
+== batch owner effort-verdicts (stdin: harness<TAB>model<TAB>effort) ==
+{
+  "omp": {
+    "vibeproxy/deepseek-v4.1-flash": {
+      "medium": "unsupported",
+      "high": "supported"
+    },
+    "vibeproxy/gpt-6-luna": {
+      "xhigh": "supported"
+    }
+  },
+  "pi": {
+    "codex-native/gpt-5.6-luna": {
+      "ultra": "supported"
+    }
+  }
+}
