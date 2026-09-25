@@ -791,6 +791,59 @@ EOF
   pass "the completion gate attests captain-held inventory and transfers open status decisions"
 }
 
+# The completion gate's own end state on a well-run investigation: the origin
+# carries decision keys, but every one of them is already resolved, so the live
+# status fold yields no row to transfer. The transfer append must simply not
+# happen - the command still has to attest the reviewed inventory and exit
+# cleanly, and it must leave the status stream byte-identical rather than
+# inventing a bookkeeping close for a decision that is no longer open.
+test_completion_attests_when_every_status_decision_is_resolved() {
+  local home id out err rc before open
+  home=$(make_home resolved-inventory)
+  id=sample-settled-review
+  mkdir -p "$home/data/$id"
+  tasks_in "$home" add "$id" "Investigate sample settling" --kind scout --repo sample --start >/dev/null \
+    || fail "could not create the settled-inventory origin"
+  write_origin_meta "$home" "$id"
+  cat > "$home/state/$id.status" <<'EOF'
+needs-decision [key=route]: choose route north or route south
+resolved [key=route]: the captain chose route north
+done: report complete
+EOF
+  printf '# Sample settled review\n\nEvery captain choice is recorded.\n' > "$home/data/$id/report.md"
+  run_captain "$home" hold sample-settled-call \
+    --title "Track the settled choice" --reason "captain settled choice pending" \
+    --repo sample --origin "$id" >/dev/null \
+    || fail "could not register the captain-held task"
+
+  open=$(bash -c '. "$1"; status_open_decisions "$2"' _ \
+    "$ROOT/bin/fm-classify-lib.sh" "$home/state/$id.status")
+  [ -z "$open" ] \
+    || fail "the fixture must carry decision keys with no open status decision: $open"
+  before=$(cat "$home/state/$id.status")
+
+  rc=0
+  run_captain "$home" complete "$id" sample-settled-call \
+    > "$home/resolved.out" 2> "$home/resolved.err" || rc=$?
+  out=$(cat "$home/resolved.out")
+  err=$(cat "$home/resolved.err")
+  [ "$rc" -eq 0 ] \
+    || fail "the completion gate failed on a fully resolved inventory (rc=$rc): $err"
+  assert_contains "$out" "complete: $id captain-call inventory reviewed (sample-settled-call)" \
+    "the resolved inventory was not attested"
+  assert_not_contains "$err" "unbound variable" \
+    "the completion gate aborted over an unset transfer list: $err"
+  assert_grep "decisions_reviewed=1" "$home/state/$id.meta" \
+    "the resolved inventory recorded no completion attestation"
+  assert_grep "decision_keys=sample-settled-call" "$home/state/$id.meta" \
+    "the resolved inventory was not recorded as task ids"
+  [ "$(cat "$home/state/$id.status")" = "$before" ] \
+    || fail "an already-resolved decision gained a bookkeeping transfer line"
+  run_captain "$home" verify "$id" >/dev/null \
+    || fail "verify refused the inventory after a resolved-decision completion"
+  pass "the completion gate attests an inventory whose status decisions are all resolved"
+}
+
 # The recorded-answer rule: answering closes with the captain's exact words, an
 # exact retry is idempotent, a drifted retry is rejected, dependent work routed
 # behind the answered task is released by the close, and the completion gate is
@@ -4208,6 +4261,7 @@ test_uninventoried_report_decision_refuses_completion
 test_hold_decodes_a_bare_scalar_body_without_the_nonref_default
 test_retained_body_keeps_its_utf8_bytes
 test_completion_gate_attests_and_transfers
+test_completion_attests_when_every_status_decision_is_resolved
 test_answer_records_and_closes
 test_release_frees_held_work
 test_hold_stamp_precedes_hold_visibility
