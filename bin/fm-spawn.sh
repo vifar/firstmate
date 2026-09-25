@@ -912,18 +912,6 @@ spawn_remote_secondmate() {
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 1
   fi
-  # The model's own advertised ladder bounds the effort here too: a remote
-  # secondmate pin must not record a level its model cannot honour without that
-  # being visible. bin/fm-harness.sh is the single reader; an unreadable ladder
-  # is a notice, never a refusal.
-  if [ "$effort" != - ] && [ "$effort" != ultra ] && [ "$effort" != default ]; then
-    remote_ladder=$("$SCRIPT_DIR/fm-harness.sh" effort-verdict "$harness" "$model" "$effort" 2>/dev/null) || remote_ladder=
-    if [ "$(printf '%s' "$remote_ladder" | cut -f1)" = unsupported ] &&
-      [ "$(printf '%s' "$remote_ladder" | cut -f2)" = model-ladder ]; then
-      echo "warning: configured secondmate effort '$effort' is not in model '$model' advertised thinking ladder ($(printf '%s' "$remote_ladder" | cut -f3)); launching '$model' without an effort flag" >&2
-      effort=-
-    fi
-  fi
   meta="$STATE/$id.meta"
   if [ -e "$meta" ] || [ -L "$meta" ]; then
     if ! fm_backlog_record_present "$meta" "task record" "$STATE" ||

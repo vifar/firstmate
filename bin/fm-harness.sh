@@ -611,14 +611,6 @@ levels_intersect() {  # <levels> <levels>
   printf '%s\n' "${out# }"
 }
 
-levels_json() {  # <levels> -> a JSON array on one line
-  local out='[]' lvl
-  for lvl in $1; do
-    out=$(printf '%s' "$out" | jq -c --arg l "$lvl" '. + [$l]' 2>/dev/null) || out='[]'
-  done
-  printf '%s\n' "$out"
-}
-
 # Print `omp models --json` verbatim, or nothing when it cannot be read. Cached
 # for the life of the process, so answering many pairs costs one probe. A stalled
 # vendor CLI must never block a spawn or a session start, so the probe runs under
@@ -735,12 +727,11 @@ effort_verdict() {  # <harness> <model> [<effort>]
 # Read "<harness>\t<model>\t<effort>" lines on stdin and print ONE nested JSON
 # object, harness -> model -> effort -> "supported" | "unsupported", so a jq
 # config validator consults this owner instead of restating any effort table.
-# The "*" harness key is the permissive shared vocabulary for a harness this
-# owner declares no axis for. Every requested triple gets an entry, and each
-# model's ladder is read once no matter how many levels are asked about.
+# Every requested triple gets an entry, and each model's ladder is read once no
+# matter how many levels are asked about.
 effort_verdicts() {
   local harness model effort fields set verdict entry
-  entry='{"*":{"*":{"low":"supported","medium":"supported","high":"supported","xhigh":"supported","max":"supported"}}}'
+  entry='{}'
   while IFS=$'\t' read -r harness model effort || [ -n "$harness" ]; do
     [ -n "$harness" ] || continue
     [ -n "$model" ] || model=-
