@@ -1131,27 +1131,44 @@ crew_dispatch_validate() {
   [ -n "$typed_key" ] || typed_key=$AI_GATEWAY_API_KEY_PRIVATE
   [ -n "$typed_key" ] || typed_key=$(fmx_env_get AI_GATEWAY_API_KEY "$FM_HOME/.env")
   [ -z "$typed_key" ] || typed_active=true
+  # Effort levels are owned by bin/fm-harness.sh (effort-verdicts): the harness
+  # accepted set narrowed by the model's own advertised ladder. Ask the owner
+  # once for every requested triple instead of restating an effort table here, so
+  # a standing config that asks for a level its MODEL does not advertise (the
+  # real defect this gate exists to catch) is reported, not passed over. An owner
+  # that cannot answer leaves the triple unknown and is reported as such, never
+  # silently treated as valid.
+  local effort_triples effort_verdicts
+  effort_triples=$(jq -r '
+    def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
+    ([(.rules // [])[]? | profiles(.use?)[]?]
+      + (if has("default") then [profiles(.default)[]?] else [] end))
+    | .[]
+    | select((.harness? | type) == "string")
+    | select(.effort? != null and (.effort | type) == "string")
+    | "\(.harness)\t\(if (.model? | type) == "string" then .model else "-" end)\t\(.effort)"
+  ' "$file" 2>/dev/null) || effort_triples=
+  effort_verdicts=
+  if [ -n "$effort_triples" ]; then
+    effort_verdicts=$(printf '%s\n' "$effort_triples" | "$SCRIPT_DIR/fm-harness.sh" effort-verdicts 2>/dev/null) || effort_verdicts=
+  fi
+  [ -n "$effort_verdicts" ] || effort_verdicts='{}'
   if $typed_active; then
     verified_harnesses=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')
   else
     verified_harnesses='["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","agy","muse","rovo","omp"]'
   fi
-  err=$(jq -r --argjson typed "$typed_active" --argjson verified_harnesses "$verified_harnesses" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
+  err=$(jq -r --argjson typed "$typed_active" --argjson verified_harnesses "$verified_harnesses" --argjson effort_verdicts "$effort_verdicts" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
     def verified($h): $verified_harnesses | index($h);
     def provider_id($p): ($p | type) == "string" and ($p | test($provider_re));
+    # Effort values are owned by bin/fm-harness.sh (--argjson effort_verdicts).
+    # "unsupported" is the owner verdict that this harness/model cannot honour
+    # the requested level; a triple the owner did not answer for is unknown, not
+    # a verdict, so it is left to the launch-time gate.
     def effort_ok($h; $m; $e):
       if $e == null then true
       elif ($e | type) != "string" then false
-      elif $e == "ultra" then (($h == "pi" or $h == "pi-signed") and (($m | type) == "string") and ($m | startswith("codex-native/")) and ($m | length) > 13)
-      elif $h == "claude" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "codex" then ((["low","medium","high","xhigh"] | index($e)) != null or ($e == "max" and $m == "gpt-5.6-luna"))
-      elif $h == "grok" then (["low","medium","high"] | index($e))
-      elif $h == "agy" then (["low","medium","high"] | index($e))
-      elif $h == "pi" or $h == "pi-signed" or $h == "omp" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "muse" then (["low","medium","high","xhigh","max"] | index($e))
-      elif $h == "rovo" then (["low","medium","high","max"] | index($e))
-      elif $h == "opencode" or $h == "kimi" or $h == "cursor" then false
-      else true
+      else (($effort_verdicts[$h][($m // "-")][$e] // "unknown") != "unsupported")
       end;
     def profiles($value):
       if ($value | type) == "array" then $value

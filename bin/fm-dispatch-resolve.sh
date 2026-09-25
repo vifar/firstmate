@@ -134,22 +134,44 @@ cp "$RULES_PATH" "$RULES" || die "could not snapshot rules file: $RULES_PATH"
 chmod 400 "$RULES" || die "could not protect rules snapshot"
 VERIFIED_HARNESSES=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')
 
+# The effort axis is owned by bin/fm-harness.sh: it alone knows what level a
+# harness accepts for a given model. Collect every requested
+# harness/model/effort triple once and ask that owner for its verdicts, so this
+# validator never restates an effort table and cannot drift from the launch
+# gate. An owner that cannot answer leaves every triple unknown, which is a
+# notice (the documented "an unreachable surface establishes nothing"), never a
+# verdict - and never a malformed-config refusal.
+EFFORT_TRIPLES=$(jq -r '
+  def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
+  ([(.rules // [])[]? | profiles(.use?)[]?]
+    + (if has("default") then [profiles(.default)[]?] else [] end))
+  | .[]
+  | select((.harness? | type) == "string")
+  | select(.effort? != null and (.effort | type) == "string")
+  | "\(.harness)\t\(if (.model? | type) == "string" then .model else "-" end)\t\(.effort)"
+' "$RULES" 2>/dev/null) || EFFORT_TRIPLES=
+EFFORT_VERDICTS=
+if [ -n "$EFFORT_TRIPLES" ]; then
+  EFFORT_VERDICTS=$(printf '%s\n' "$EFFORT_TRIPLES" | "$SCRIPT_DIR/fm-harness.sh" effort-verdicts 2>/dev/null) || EFFORT_VERDICTS=
+fi
+if [ -z "$EFFORT_VERDICTS" ]; then
+  EFFORT_VERDICTS='{}'
+  [ -z "$EFFORT_TRIPLES" ] || echo "warning: could not validate the configured effort levels against their harness and model; treating each as unknown" >&2
+fi
+
 # The fields this tool consumes must be well formed; bootstrap owns the wider
 # schema diagnostic, but an intake never selects around a malformed file.
-rules_err=$(jq -r --argjson verified_harnesses "$VERIFIED_HARNESSES" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
+rules_err=$(jq -r --argjson verified_harnesses "$VERIFIED_HARNESSES" --argjson effort_verdicts "$EFFORT_VERDICTS" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
   def verified($h): $verified_harnesses | index($h);
   def provider_id($p): ($p | type) == "string" and ($p | test($provider_re));
+  # Effort values are owned by bin/fm-harness.sh (--argjson effort_verdicts).
+  # "supported" is the only value that passes; a triple the owner did not answer
+  # for is unknown, not a verdict, so it is left to the launch-time gate.
   def effort_ok($h; $m; $e):
     if $e == null then true
     elif ($e | type) != "string" then false
-    elif $e == "ultra" then (($h == "pi" or $h == "pi-signed") and (($m | type) == "string") and ($m | startswith("codex-native/")) and ($m | length) > 13)
-    elif $h == "claude" then (["low","medium","high","xhigh","max"] | index($e)) != null
-    elif $h == "codex" then ((["low","medium","high","xhigh"] | index($e)) != null or ($e == "max" and $m == "gpt-5.6-luna"))
-    elif $h == "grok" or $h == "agy" then (["low","medium","high"] | index($e)) != null
-    elif $h == "pi" or $h == "pi-signed" or $h == "omp" or $h == "muse" then (["low","medium","high","xhigh","max"] | index($e)) != null
-    elif $h == "rovo" then (["low","medium","high","max"] | index($e)) != null
-    elif $h == "opencode" or $h == "kimi" or $h == "cursor" then false
-    else true end;
+    else (($effort_verdicts[$h][($m // "-")][$e] // "unknown") != "unsupported")
+    end;
   def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
   def floor_bad($f; $need_provider):
     ($f | type) != "object"
