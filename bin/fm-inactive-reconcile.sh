@@ -48,12 +48,31 @@
 # skipped here, so one outcome is never reported twice. It then uses
 # fm-crew-state.sh as the sole current-state source.
 # A done or failed state creates the durable terminal outcome and standard
-# non-force cleanup path below. A blocked or parked state, or an unknown state
-# that cannot prove current execution, creates one durable actionable wake per
-# task incarnation and exact state/status fingerprint. That wake names the
-# blocker or decision from the status ledger, so an acknowledged notification
-# is not emitted again unless the obligation changes. Working remains active;
-# paused and captain-held work retain their existing bounded wait semantics.
+# non-force cleanup path below. A blocked, parked, or paused state, or an
+# unknown state that cannot prove current execution, creates one durable
+# actionable wake per task incarnation and exact state/status fingerprint.
+# That wake names the blocker, decision, or declared wait from the status
+# ledger, so an acknowledged notification is not emitted again unless the
+# obligation changes. Working remains active.
+#
+# A paused obligation is deliberately the same bounded shape as a blocked or
+# parked one, and it is NOT a wedge alarm: declaring an external wait still buys
+# exactly the bounded recheck cadence bin/fm-watch.sh and bin/fm-supervise-daemon.sh
+# already give it in place of wedge escalation, because the wait itself is real
+# and often perfectly legitimate. What the obligation adds is the other half of a
+# declared wait. A genuine external blocker can coexist with a worker that has
+# plenty to do - rows its remaining scope re-opened under a contract that landed
+# while it waited, a runbook for the moment the dependency lands - and a recheck
+# that only re-validates the blocker can never see that, so a parked worker could
+# sit idle with nothing surfacing it at all.
+#
+# The obligation therefore asks the supervisor, once per distinct declaration,
+# what the worker could be doing instead; an unchanged declaration stays quiet,
+# and a changed reason or status line re-surfaces. That one-per-declaration bound
+# is what keeps a genuinely waiting worker - including one whose only remaining
+# wait is the captain's merge decision - from turning into recurring noise.
+# Captain-held work stays excluded here as before, because its wait is already
+# tracked as the captain's own open call rather than a dependency to work around.
 #
 # A terminal-outcomes/<fingerprint>.pending record remains until its upstream
 # receipt is durable.
@@ -120,14 +139,23 @@ inactive_obligation_marker() { # <id>
 }
 
 surface_inactive_obligation() { # <id> <incarnation> <state> <state-line> <status-line>
-  local id=$1 incarnation=$2 state=$3 state_line=$4 status_line=$5 marker fingerprint previous tmp note payload
+  local id=$1 incarnation=$2 state=$3 state_line=$4 status_line=$5 marker fingerprint previous tmp note ask payload
   marker=$(inactive_obligation_marker "$id")
   fingerprint=$(sha256_text "$incarnation|$id|$state|$(clean_field "$state_line")|$(clean_field "$status_line")")
   previous=$(cat "$marker" 2>/dev/null || true)
   [ "$previous" != "$fingerprint" ] || return 0
   note=$(status_line_note "$status_line")
   [ -n "$note" ] || note=$(clean_field "$state_line")
+  # A paused obligation must not be dischargeable by re-validating the blocker
+  # alone: the declared wait can be perfectly genuine while the worker has plenty
+  # of available work, so the ask names both halves. The other states already
+  # demand action on the blocker or decision they carry.
+  case "$state" in
+    paused) ask='confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work' ;;
+    *) ask='' ;;
+  esac
   payload="inactive worker requires action: task=$id state=$state reason=$(clean_field "$note")"
+  [ -z "$ask" ] || payload="$payload; ask: $ask"
   publish_actionable "inactive-worker:$id:$fingerprint" "$payload" || {
     [ "$?" -eq 1 ] || return 1
   }
@@ -588,6 +616,7 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
     'state: failed '*) state='failed' ;;
     'state: blocked '*) surface_inactive_obligation "$id" "$incarnation" blocked "$state_line" "$last"; return ;;
     'state: parked '*) surface_inactive_obligation "$id" "$incarnation" parked "$state_line" "$last"; return ;;
+    'state: paused '*) surface_inactive_obligation "$id" "$incarnation" paused "$state_line" "$last"; return ;;
     'state: unknown '*) surface_inactive_obligation "$id" "$incarnation" unknown "$state_line" "$last"; return ;;
     *) rm -f -- "$(inactive_obligation_marker "$id")"; return 0 ;;
   esac

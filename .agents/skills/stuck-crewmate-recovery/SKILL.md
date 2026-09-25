@@ -34,6 +34,8 @@ For every stale notification or `inactive worker requires action` notification, 
 The verified `captain-held` transfer is the separate status-backed exception: its durable hold remains on the declared-wait path even when no worker metadata remains.
 An authoritative `state: working` from `source: run-step` or `source: pane` means the worker is genuinely in progress: continue supervision rather than escalating.
 A declared `paused` state remains the existing bounded external-wait path; it is intentional waiting and must not be mislabeled a wedge.
+It is also not proof that the worker has nothing to do: a genuine blocker can coexist with a worker that has available work - remaining rows its scope re-opened under a contract that landed while it waited, or its post-dependency runbook - and a recheck that only re-validates the declared wait can never see that.
+So a paused notification is answered on both halves: confirm the wait, and establish what the worker can do meanwhile, then steer it to that work rather than closing the notification on the blocker alone.
 A `blocked` state must remain alive, explicitly monitored, and surfaced with the exact blocker until it is resolved; do not repeatedly wake for an unchanged blocker, and do not clean it up merely because its endpoint is idle.
 A `parked` state must resolve to the concrete captain decision, credential, or access that resumes it; use the existing captain-call lifecycle rather than leaving an implicit wait.
 A `done` or `failed` state follows the terminal-outcome receipt and standard non-force cleanup path, which preserves evidence and retains the worker whenever teardown finds uncommitted or unlanded work.

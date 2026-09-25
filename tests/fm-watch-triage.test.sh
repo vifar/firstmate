@@ -2718,11 +2718,16 @@ test_wedge_threshold_defers_to_a_declared_wait_under_a_working_verdict() {
     || fail "the declared-wait recheck did not name its evidence as declared: $(cat "$out")"
   # A `paused:` declaration names an external dependency the worker chose, so its
   # recheck asks the reader to confirm that dependency - never to answer or
-  # release a hold, which is a different human and a different action.
+  # release a hold, which is a different human and a different action. It must
+  # also demand the available-work question, because a valid blocker can coexist
+  # with a worker that has plenty to do: re-validating the blocker alone has to
+  # leave the recheck unsatisfied, or a parked worker can sit idle unseen.
   grep -F 'awaiting external' "$out" >/dev/null \
     || fail "the declared-wait recheck did not name the human the wait is on: $(cat "$out")"
   grep -F 'confirm the wait still holds' "$out" >/dev/null \
     || fail "the declared-wait recheck lost its external-wait action: $(cat "$out")"
+  grep -F 'what the worker can do while it waits' "$out" >/dev/null \
+    || fail "the declared-wait recheck can be satisfied by confirming the blocker alone: $(cat "$out")"
   grep -F 'release the hold' "$out" >/dev/null \
     && fail "a declared external wait borrowed the captain-held release action: $(cat "$out")"
   grep -F 'possible wedge' "$out" >/dev/null \

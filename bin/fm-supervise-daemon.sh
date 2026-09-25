@@ -1167,9 +1167,9 @@ housekeeping() {  # <state>
           fi
         elif [ -n "$last" ] && status_is_paused "$last"; then
           if [ "$bounded_until" -eq 1 ]; then
-            pause_reason="paused ${age}s (awaiting external, the declared time is beyond the recheck cadence; confirm the wait still holds): $win"
+            pause_reason="paused ${age}s (awaiting external, the declared time is beyond the recheck cadence; confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work): $win"
           else
-            pause_reason="paused ${age}s (awaiting external, recheck whether the wait still holds): $win"
+            pause_reason="paused ${age}s (awaiting external; confirm the wait still holds AND establish what the worker can do while it waits - a valid wait is not evidence of no available work): $win"
           fi
           if escalate_add "$state" "$pause_reason"; then
             _now > "$marker"

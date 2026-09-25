@@ -1013,6 +1013,11 @@ test_housekeeping_paused_resurfaces_and_resets() {
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
     FM_STATE_OVERRIDE="$state" FM_PAUSE_RESURFACE_SECS=240 housekeeping "$state"
   grep -F "awaiting external" "$state/.subsuper-escalations" >/dev/null 2>&1 || fail "declared pause was not re-surfaced as an awaiting-external recheck"
+  # Away mode's recheck can be the only one a lane gets, so it must carry the
+  # available-work half too: re-validating the declared dependency alone has to
+  # leave it unsatisfied, or a parked worker sits idle unseen.
+  grep -F "what the worker can do while it waits" "$state/.subsuper-escalations" >/dev/null 2>&1 \
+    || fail "the daemon's declared-pause recheck can be satisfied by confirming the blocker alone"
   grep -F "awaiting the captain" "$state/.subsuper-escalations" >/dev/null 2>&1 && fail "declared pause named the captain instead of its external dependency"
   grep -F "possible wedge" "$state/.subsuper-escalations" >/dev/null 2>&1 && fail "declared pause was mislabeled a possible wedge"
   [ -e "$state/.subsuper-paused-$key" ] || fail "pause marker cleared instead of reset for the next window"
