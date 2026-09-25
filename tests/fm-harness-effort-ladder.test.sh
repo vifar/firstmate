@@ -236,8 +236,8 @@ case "\${1:-}" in
         [ -f "\$staged" ] && payload=\$(cat "\$staged")
         ;;
     esac
-    # Only bare pane-setup lines are dropped: fm-spawn types `treehouse get`,
-    # `cd`, and single `export VAR=value` lines before the real launch.
+    # Only bare pane-setup lines are dropped: fm-spawn types 'treehouse get',
+    # 'cd', and single 'export VAR=value' lines before the real launch.
     run=1
     case "\$payload" in
       '' | treehouse\ * | cd\ *) run='' ;;
@@ -251,7 +251,7 @@ case "\${1:-}" in
     # the task's per-task omp extension through -e, so the agent_start busy event
     # the post-launch readiness gate waits for is synthesized from that path.
     # Executing the real command would run the vendor binary and the pane's
-    # `treehouse get` against the developer's own pool, which a test must not do.
+    # 'treehouse get' against the developer's own pool, which a test must not do.
     ext=\$(printf '%s' "\$payload" | tr -d "'" | tr ' ' '\\n' | grep -m1 'omp-ext\\.ts\$')
     if [ -n "\$ext" ]; then
       state=\${ext%/*}; base=\${ext##*/}; id=\${base%.omp-ext.ts}

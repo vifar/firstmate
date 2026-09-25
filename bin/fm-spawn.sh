@@ -3988,6 +3988,7 @@ agy_spawn_fail() {  # <detail>
 omp_wait_for_working() {
   local timeout=${FM_OMP_READY_TIMEOUT_SECS:-90} rc=0
   case "$timeout" in ''|*[!0-9]*|0*) timeout=90 ;; esac
+  # shellcheck disable=SC2016  # Expansion is deliberately deferred to the child shell.
   fm_run_timed "$timeout" bash -c '
     state=$1
     id=$2
