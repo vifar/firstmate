@@ -817,6 +817,25 @@ tests/fm-watch-checkpoint.test.sh 5779
 tests/fm-watch-recovery-loop.test.sh 58731
 tests/fm-watch-triage.test.sh 262626
 tests/fm-watcher-lock.test.sh 88554
+EOFtests/fm-backlog-read-bound.test.sh 23755
+tests/fm-calm-claude-mod.test.sh 1532
+tests/fm-ci-workflow.test.sh 5433
+tests/fm-claude-trust.test.sh 10401
+tests/fm-contributions.test.sh 39390
+tests/fm-gemini-harness.test.sh 770
+tests/fm-harness-precedence.test.sh 3938
+tests/fm-inbox.test.sh 5342
+tests/fm-mail-check.test.sh 7594
+tests/fm-mail.test.sh 8537
+tests/fm-nm-test-contract.test.sh 672
+tests/fm-pr-reviewers.test.sh 131
+tests/fm-pr-state.test.sh 388
+tests/fm-rovo-harness.test.sh 15816
+tests/fm-send-agy-confirm.test.sh 2923
+tests/fm-spawn-compact-adviser-disable-remote.test.sh 31815
+tests/fm-spawn-compact-adviser-disable.test.sh 19439
+tests/fm-stat-shadowing.test.sh 49
+tests/fm-tasks-axi.test.sh 1769
 EOF
 }
 
