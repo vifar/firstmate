@@ -82,15 +82,12 @@
 # second owner of a contract that must stay current across relaunches.
 # A home may carry standing worker instructions without editing this tracked
 # script: when config/brief-include.md exists under the active home, ship and
-# scout scaffolds append its text verbatim as their last section, "# Home brief
-# additions", which defers to every other section of the brief. It goes last
-# because the machine-read `# Task` heading resolves to its first match, so
-# appended text can never shadow it; a later scout promotion appends its ship
-# contract below it, which that position-free deference already covers. An
-# absent or blank file changes nothing; a present path that is not a readable
-# regular file, or text carrying its own "Delivery contract: mode=" line (which
-# a later scout promotion could not outrank), stops the scaffold before
-# anything is written. Secondmate charters never take it.
+# scout scaffolds append its text verbatim as their last section, which defers
+# to every other brief section. Project-specific ship completion bars instead
+# use config/project-completion-contracts/<project>.md; fm-dod-lib.sh renders
+# that sentence in place of the generic bar for briefs and promotions.
+# A present completion contract must contain one readable non-empty line, and
+# project names are validated before constructing its path.
 # Refuses to overwrite an existing brief.
 set -eu
 
@@ -514,7 +511,13 @@ case "$MODE" in
     ;;
 esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID") || exit 1
-DOD=$(fm_dod_block "$MODE" "$ID") || exit 1
+case "$MODE" in
+  direct-PR) DEFAULT_COMPLETION_BAR='The task is complete only when committed on your branch.' ;;
+  local-only) DEFAULT_COMPLETION_BAR="The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge." ;;
+  no-mistakes) DEFAULT_COMPLETION_BAR='The task is complete only when committed on your branch.' ;;
+esac
+COMPLETION_BAR=$(fm_dod_completion_bar "$CONFIG" "$REPO" "$DEFAULT_COMPLETION_BAR") || exit 1
+DOD=$(fm_dod_block "$MODE" "$ID" "$COMPLETION_BAR") || exit 1
 
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.

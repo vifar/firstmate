@@ -1113,6 +1113,42 @@ test_home_brief_include_is_appended_last() {
   pass "fm-brief.sh: the home brief include lands last on ship and scout, verbatim, and fails closed"
 }
 
+test_project_completion_contract_replaces_only_generic_bar() {
+  local home config controller ordinary brief out rc
+  home="$TMP_ROOT/project-completion-home"
+  config="$home/config/project-completion-contracts"
+  mkdir -p "$config"
+  printf '%s\n' 'The task is complete only after the Controller automated review lane approves the pull request.' > "$config/controller.md"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" controller-task controller --mode direct-PR >/dev/null \
+    || fail "controller brief failed with its project completion contract"
+  controller="$home/data/controller-task/brief.md"
+  assert_grep 'The task is complete only after the Controller automated review lane approves the pull request.' "$controller" \
+    "Controller brief did not render the configured approval milestone"
+  assert_no_grep 'The task is complete only when committed on your branch.' "$controller" \
+    "Controller brief retained the contradictory commit-only completion bar"
+  assert_grep 'This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.' "$controller" \
+    "Controller-specific completion bar displaced the direct-PR lifecycle"
+  assert_grep 'The configured merge authority decides whether to merge the PR; firstmate relays the outcome.' "$controller" \
+    "Controller-specific completion bar displaced the configured merge authority"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" ordinary-task ordinary --mode direct-PR >/dev/null \
+    || fail "ordinary brief failed without a project completion contract"
+  ordinary="$home/data/ordinary-task/brief.md"
+  assert_grep 'The task is complete only when committed on your branch.' "$ordinary" \
+    "ordinary project lost its default completion bar"
+  assert_no_grep 'Controller automated review lane' "$ordinary" \
+    "Controller completion bar leaked into another project"
+
+  printf '%s\n' 'First line.' 'Second line.' > "$config/invalid.md"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" invalid-task invalid --mode direct-PR 2>&1); rc=$?
+  expect_code 1 "$rc" "multi-line completion contract must be refused"
+  assert_contains "$out" 'must contain one non-empty sentence' "invalid completion contract refusal was unclear"
+  assert_absent "$home/data/invalid-task/brief.md" "invalid completion contract published a partial brief"
+  pass "fm-brief.sh: project completion bar replaces generic sentence without changing ordinary lifecycle"
+}
+
+test_project_completion_contract_replaces_only_generic_bar
 test_worker_role_scope
 test_script_parses
 test_no_heredoc_in_command_substitution
