@@ -43,6 +43,51 @@
 # fm_ship_rule_one owns the mode-specific first ship safety rule shared by an
 # ordinary ship brief and the durable contract written during scout promotion.
 
+# A project may replace the generic completion sentence through its home-local
+# config/project-completion-contracts/<project>.md file. The file is one sentence:
+# delivery mechanics remain owned here, while projects can require an additional
+# lifecycle milestone without adding a competing brief section.
+fm_dod_completion_bar() {  # <config-dir> <project-name> <default-sentence>
+  local config_dir=$1 project=$2 default=$3 file value
+  if [ -z "$project" ]; then
+    printf '%s\n' "$default"
+    return 0
+  fi
+  case "$project" in
+    .|..|*[!A-Za-z0-9._-]*)
+      echo "error: invalid project name for completion contract: $project" >&2
+      return 1 ;;
+  esac
+  file="$config_dir/project-completion-contracts/$project.md"
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    printf '%s\n' "$default"
+    return 0
+  fi
+  if [ ! -f "$file" ] || [ ! -r "$file" ] || [ -L "$file" ]; then
+    echo "error: project completion contract must be a readable regular file: $file" >&2
+    return 1
+  fi
+  value=$(cat "$file") || {
+    echo "error: could not read project completion contract: $file" >&2
+    return 1
+  }
+  line_count=$(awk 'END { print NR }' "$file")
+  if [ "$line_count" -ne 1 ]; then
+    echo "error: project completion contract must contain one non-empty sentence: $file" >&2
+    return 1
+  fi
+  [ -n "$(printf '%s' "$value" | tr -d '[:space:]')" ] || {
+    echo "error: project completion contract must contain one non-empty sentence: $file" >&2
+    return 1
+  }
+  case "$value" in
+    *'Delivery contract: mode='*)
+      echo "error: project completion contract must not replace the delivery mode: $file" >&2
+      return 1 ;;
+  esac
+  printf '%s\n' "$value"
+}
+
 fm_brief_worker_role() {  # <state-dir> <task-id>
   local state=$1 task_id=$2
   cat <<'EOF'
@@ -246,8 +291,8 @@ fm_ask_user_escalation_block() {  # <data-dir> <task-id>
 EOF
 }
 
-fm_dod_block() {  # <mode> <task-id>
-  local mode=$1 id=$2
+fm_dod_block() {  # <mode> <task-id> <completion-bar>
+  local mode=$1 id=$2 completion_bar=${3:-}
   case "$mode" in
     direct-PR)
       cat <<EOF
@@ -255,7 +300,7 @@ fm_dod_block() {  # <mode> <task-id>
 Delivery contract: mode=direct-PR
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 When this task is linked to a GitHub issue on its live backlog row, read the issue from the forge before reporting done and confirm it is closed and carries the configured verified label (\`FM_ISSUE_VERIFIED_LABEL\`, default \`verified\`). Never hand-tick or apply verification. If the issue is open, unreadable, or missing that label, append \`blocked [key=issue-finalization]: issue <exact URL>; <reason>\` and stop; do not claim completion or resolve the blocker until proof exists. Keep the reason current as you recheck; the exact issue URL and key identify this blocker.
-The task is complete only when committed on your branch.
+${completion_bar:-This task is complete only when committed on your branch.}
 1: When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
@@ -278,7 +323,7 @@ EOF
 # Definition of done
 Delivery contract: mode=local-only
 This task ships **local-only**: no remote, no PR, no pipeline.
-The task is complete only when committed on your branch \`fm/$id\`. Do NOT push, do NOT open a PR, do NOT merge.
+${completion_bar:-The task is complete only when committed on your branch \`fm/$id\`. Do NOT push, do NOT open a PR, do NOT merge.}
 When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
@@ -290,7 +335,7 @@ EOF
       cat <<EOF
 # Definition of done
 Delivery contract: mode=no-mistakes
-The task is complete only when committed on your branch.
+${completion_bar:-This task is complete only when committed on your branch.}
 When writing or changing tests, assert consumer-visible behavior through an executable or public interface, including meaningful boundaries, transitions, and errors; never assert source text, wiring, incidental defaults, or mock echoes. Remove existing tests that violate this bar instead of re-pinning them.
 Before reporting completion, report the complete PR check set with each check's name and state, including failures and pending checks; report unresolved review threads by name and state. Do not claim all checks pass unless every required check is confirmed green.
 Review the change for dead code, speculative surface, and redundant indirection. Report each finding with file:line evidence, or explicitly state that none were found.

@@ -393,6 +393,13 @@ An absent or blank file changes nothing, while a present path that is not a read
 The text is static and never executed or expanded; secondmate charters never take it, and the file is local to each home rather than part of secondmate inherited configuration.
 `bin/fm-brief.sh`'s header owns the placement rule and its safety argument.
 
+## Project completion contract (config/project-completion-contracts/<project>.md)
+
+An optional local, gitignored `config/project-completion-contracts/<project>.md` replaces the generic completion sentence in ship briefs for that project. Use the project name passed to `fm-brief.sh` or the basename of a task's recorded project in promotion.
+The file must be a readable regular file containing exactly one non-empty line and must not replace the machine-readable delivery-mode line; malformed contracts stop brief generation or scout promotion before publication.
+This sentence is rendered in place of the default completion sentence, not appended as a competing instruction, while the mode-specific PR, validation, and merge mechanics remain owned by `bin/fm-dod-lib.sh`.
+An absent file leaves the ordinary project completion contract unchanged.
+
 ## Worker launch environment (config/launch-env-allowlist)
 
 The optional local, gitignored `config/launch-env-allowlist` limits the ambient environment passed to newly launched workers, scouts, and secondmates, including relaunches.

@@ -33,7 +33,9 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
-
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+META=
+PROJECT_NAME=
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
@@ -143,6 +145,16 @@ if ! fm_backlog_record_present "$META" "task record" "$STATE"; then
   echo "error: task record for $ID is unsafe or missing ($FM_BACKLOG_TRANSITION_ERROR)" >&2
   exit 1
 fi
+META_PROJECT=$(sed -n 's/^project=//p' "$META" | sed -n '1p')
+PROJECT_NAME=
+if [ -n "$META_PROJECT" ]; then
+  PROJECT_NAME=$(basename -- "$META_PROJECT")
+  if [ -z "$PROJECT_NAME" ] || [ "$PROJECT_NAME" = . ] || [ "$PROJECT_NAME" = / ]; then
+    echo "error: task $ID has an unusable recorded project identity" >&2
+    exit 1
+  fi
+fi
+
 grep -qx 'kind=scout' "$META" || { echo "error: task $ID is not a scout task (kind=scout not in meta)" >&2; exit 1; }
 
 SCOUT_BRIEF="$DATA/$ID/brief.md"
@@ -176,9 +188,15 @@ fi
 # the --yes ban is the delivery hole this file used to leave open.
 INSTRUCTIONS="$DATA/$ID/ship-instructions.md"
 PROMOTION_ASK_USER_BLOCK=
+PROMOTION_COMPLETION_BAR=
 if [ "$MODE" = no-mistakes ]; then
   PROMOTION_ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$DATA" "$ID")
 fi
+PROMOTION_DEFAULT_COMPLETION_BAR='The task is complete only when committed on your branch.'
+if [ "$MODE" = local-only ]; then
+  PROMOTION_DEFAULT_COMPLETION_BAR="The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge."
+fi
+PROMOTION_COMPLETION_BAR=$(fm_dod_completion_bar "$CONFIG" "$PROJECT_NAME" "$PROMOTION_DEFAULT_COMPLETION_BAR") || exit 1
 IFS= read -r -d '' PROMOTION_SHIP_SPEC <<EOF || true
 If these promotion steps were already completed before a relaunch, preserve the existing \`fm/$ID\` branch and continue from its current state; do not repeat them destructively.
 1. **Verify isolation before anything else.** Run \`pwd -P\` and \`git rev-parse --show-toplevel\`; both must resolve to the disposable task worktree you were launched in, such as a treehouse pool path or an Orca-managed worktree, not the primary checkout firstmate operates from. If either does not resolve to the worktree you were launched in, stop and escalate to firstmate.
@@ -206,7 +224,7 @@ EOF
     printf '%s\n' "$PROMOTION_ASK_USER_BLOCK"
   fi
   printf '\n'
-  fm_dod_block "$MODE" "$ID"
+  fm_dod_block "$MODE" "$ID" "$PROMOTION_COMPLETION_BAR"
 }
 mkdir -p "$DATA/$ID"
 [ ! -d "$INSTRUCTIONS" ] || { echo "error: ship instructions path is a directory: $INSTRUCTIONS" >&2; exit 1; }

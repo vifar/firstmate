@@ -317,7 +317,6 @@ test_promotion_delivers_the_real_definition_of_done() {
 printf '%s' "$2" > "$FM_TEST_CAPTURE"
 STUB
   chmod +x "$sendroot/bin/fm-send.sh"
-
   for mode in no-mistakes direct-PR local-only; do
     id="promote-dod-$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')"
     meta="$home/state/$id.meta"
@@ -397,6 +396,42 @@ STUB
     "promoted direct-PR worker received the pipeline gate contract"
   pass "fm-promote: a promoted worker receives the same mode-specific delivery contract a briefed one does"
 }
+test_promotion_uses_project_completion_contract() {
+  local home meta project out payload
+  home="$TMP_ROOT/promote-project-bar/home"
+  project="$TMP_ROOT/promote-project-bar/controller"
+  mkdir -p "$home/state" "$home/config/project-completion-contracts" "$project" "$home/data/promote-controller"
+  meta="$home/state/promote-controller.meta"
+  printf 'window=fm-promote-controller\nkind=scout\nworktree=%s\nproject=%s\n' "$project" "$project" > "$meta"
+  printf '%s\n' 'The task is complete only after the Controller automated review lane approves the pull request.' \
+    > "$home/config/project-completion-contracts/controller.md"
+  cat > "$home/data/promote-controller/brief.md" <<'BRIEF'
+You are a crewmate.
+
+# Task
+## Captain's intent
+Fix the review lifecycle contradiction.
+
+## Firstmate spec
+Preserve project-specific completion requirements.
+BRIEF
+
+  fill_brief_subsections "$home/data/promote-controller/brief.md" \
+    'Fix the review lifecycle contradiction.' 'Preserve project-specific completion requirements.'
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-controller --mode direct-PR --yolo off 2>&1) \
+    || fail "controller scout promotion should succeed"
+  payload="$home/data/promote-controller/ship-instructions.md"
+  assert_grep 'The task is complete only after the Controller automated review lane approves the pull request.' "$payload" \
+    "promoted Controller worker did not receive its project completion bar"
+  assert_no_grep 'The task is complete only when committed on your branch.' "$payload" \
+    "promoted Controller worker retained the generic commit-only completion bar"
+  assert_grep 'Delivery contract: mode=direct-PR' "$payload" \
+    "project completion bar displaced the promoted delivery mode"
+  assert_contains "$out" 'ship instructions for mode=direct-PR' \
+    "promotion did not report its selected delivery mode"
+  pass "fm-promote: project-specific completion bars survive scout promotion"
+}
+
 
 # The registry parser survives for the mechanical consumers only. It accepts the
 # conditional policy, maps it to its most rigorous leg for them, and exposes the
@@ -891,6 +926,7 @@ test_scout_records_no_delivery_posture
 test_promote_requires_and_records_the_delivery_contract
 test_promote_refuses_a_symlinked_task_record
 test_promotion_delivers_the_real_definition_of_done
+test_promotion_uses_project_completion_contract
 test_project_mode_maps_the_conditional_policy
 test_spawn_and_promote_require_filled_task_subsections
 echo "# all fm-task-delivery tests passed"
