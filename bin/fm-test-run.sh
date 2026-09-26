@@ -817,7 +817,7 @@ tests/fm-watch-checkpoint.test.sh 5779
 tests/fm-watch-recovery-loop.test.sh 58731
 tests/fm-watch-triage.test.sh 262626
 tests/fm-watcher-lock.test.sh 88554
-EOFtests/fm-backlog-read-bound.test.sh 23755
+tests/fm-backlog-read-bound.test.sh 23755
 tests/fm-calm-claude-mod.test.sh 1532
 tests/fm-ci-workflow.test.sh 5433
 tests/fm-claude-trust.test.sh 10401
